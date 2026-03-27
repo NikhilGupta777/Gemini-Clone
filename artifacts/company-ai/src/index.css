@@ -1,94 +1,110 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
+@import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
-@theme inline {
-  --font-sans: 'DM Sans', sans-serif;
-  --font-display: 'Outfit', sans-serif;
+@custom-variant dark (&:is(.dark *));
 
+@theme inline {
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
-  --color-secondary: hsl(var(--secondary));
-  --color-secondary-foreground: hsl(var(--secondary-foreground));
-  --color-muted: hsl(var(--muted));
-  --color-muted-foreground: hsl(var(--muted-foreground));
-  --color-accent: hsl(var(--accent));
-  --color-accent-foreground: hsl(var(--accent-foreground));
-  --color-destructive: hsl(var(--destructive));
-  --color-destructive-foreground: hsl(var(--destructive-foreground));
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
+
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
+  --color-card-border: hsl(var(--card-border));
+
   --color-popover: hsl(var(--popover));
   --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-popover-border: hsl(var(--popover-border));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-primary-border: var(--primary-border);
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-secondary-border: var(--secondary-border);
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-muted-border: var(--muted-border);
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-accent-border: var(--accent-border);
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-destructive-border: var(--destructive-border);
+
   --color-sidebar: hsl(var(--sidebar));
-  
-  --radius-xl: 1rem;
-  --radius-2xl: 1.5rem;
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+
+  --font-sans: var(--app-font-sans);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Gemini-exact color palette */
 :root {
-  /* Deep Navy / Charcoal Dark Mode Theme inspired by premium AI interfaces */
-  --background: 224 71% 4%;
-  --foreground: 213 31% 91%;
-  
-  --card: 224 71% 6%;
-  --card-foreground: 213 31% 91%;
-  
-  --popover: 224 71% 8%;
-  --popover-foreground: 215 20.2% 65.1%;
-  
-  --primary: 262 83% 58%;
-  --primary-foreground: 210 40% 98%;
-  
-  --secondary: 222 47% 11%;
-  --secondary-foreground: 210 40% 98%;
-  
-  --muted: 223 47% 14%;
-  --muted-foreground: 215 20.2% 65.1%;
-  
-  --accent: 217 33% 17%;
-  --accent-foreground: 210 40% 98%;
-  
-  --destructive: 0 63% 31%;
-  --destructive-foreground: 210 40% 98%;
-  
-  --border: 223 47% 14%;
-  --input: 223 47% 14%;
-  --ring: 262 83% 58%;
-  
-  --sidebar: 224 71% 6%;
+  --background: 220 13% 8%;         /* #131314 - pure near-black */
+  --foreground: 0 0% 100%;           /* #ffffff */
+  --border: 0 0% 15%;                /* subtle border */
+  --input: 240 4% 18%;               /* #2d2d2f input box */
+  --ring: 217 91% 60%;
+
+  --card: 240 4% 11%;                /* #1a1a1c sidebar/card */
+  --card-foreground: 0 0% 100%;
+  --card-border: 0 0% 15%;
+
+  --sidebar: 220 13% 8%;             /* same as background */
+  --sidebar-foreground: 0 0% 100%;
+  --sidebar-border: 0 0% 0%;         /* no visible border */
+
+  --popover: 240 4% 14%;
+  --popover-foreground: 0 0% 100%;
+  --popover-border: 0 0% 18%;
+
+  --primary: 217 91% 60%;            /* blue accent */
+  --primary-foreground: 0 0% 100%;
+  --primary-border: hsl(217 91% 52%);
+
+  --secondary: 240 4% 16%;           /* hover/active state */
+  --secondary-foreground: 0 0% 100%;
+  --secondary-border: hsl(240 4% 16%);
+
+  --muted: 240 4% 16%;
+  --muted-foreground: 217 10% 60%;   /* #9aa0a6 - gray text */
+  --muted-border: hsl(240 4% 16%);
+
+  --accent: 240 4% 18%;
+  --accent-foreground: 0 0% 100%;
+  --accent-border: hsl(240 4% 18%);
+
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --destructive-border: hsl(0 84% 52%);
+
+  --app-font-sans: 'Google Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  --radius: 0.5rem;
 }
 
 @layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
   body {
-    @apply bg-background text-foreground antialiased selection:bg-primary/30 selection:text-primary-foreground;
+    @apply bg-background text-foreground;
+    font-family: var(--app-font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
-  
-  h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-display);
-    @apply font-bold tracking-tight text-foreground;
-  }
-}
-
-@layer utilities {
-  .glass-panel {
-    @apply bg-card/60 backdrop-blur-xl border border-border/50 shadow-2xl;
-  }
-  
-  .gemini-gradient-text {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-primary to-purple-400;
-  }
-  
-  .gemini-gradient-bg {
-    @apply bg-gradient-to-r from-blue-600 via-primary to-purple-600;
-  }
-
-  /* Custom scrollbar for webkit */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -97,26 +113,139 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-muted-foreground/30 rounded-full hover:bg-muted-foreground/50 transition-colors;
+    background: hsl(0 0% 25%);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(0 0% 35%);
   }
 }
 
-/* Typography styles for Markdown */
-.prose {
-  --tw-prose-body: hsl(var(--foreground));
-  --tw-prose-headings: hsl(var(--foreground));
-  --tw-prose-links: hsl(var(--primary));
-  --tw-prose-bold: hsl(var(--foreground));
-  --tw-prose-code: hsl(var(--primary-foreground));
-  --tw-prose-pre-bg: hsl(var(--secondary));
-  --tw-prose-pre-code: hsl(var(--secondary-foreground));
-  --tw-prose-quotes: hsl(var(--muted-foreground));
+/* Gemini star diamond icon */
+.gemini-star {
+  background: linear-gradient(135deg, #4285f4 0%, #ea4335 33%, #fbbc05 66%, #34a853 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
-.prose pre {
-  @apply rounded-xl border border-border/50 p-4 shadow-lg;
+/* Input box exactly like Gemini */
+.gemini-input-box {
+  background: #1e1f20;
+  border-radius: 24px;
+  border: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+.gemini-input-box:focus-within {
+  border-color: hsl(0 0% 25%);
 }
 
-.prose code {
-  @apply bg-secondary px-1.5 py-0.5 rounded-md font-mono text-sm;
+/* Pill buttons */
+.gemini-pill {
+  background: #1e1f20;
+  border: 1px solid hsl(0 0% 20%);
+  border-radius: 100px;
+  color: hsl(0 0% 87%);
+  font-size: 14px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.gemini-pill:hover {
+  background: #2d2e2f;
+}
+
+/* Sidebar item hover */
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 100px;
+  font-size: 14px;
+  color: hsl(0 0% 87%);
+  cursor: pointer;
+  transition: background 0.15s;
+  user-select: none;
+}
+.sidebar-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.sidebar-item.active {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Streaming cursor */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.streaming-cursor::after {
+  content: '▋';
+  animation: blink 1s infinite;
+  margin-left: 1px;
+  color: hsl(217 91% 60%);
+}
+
+/* Gemini response text */
+.gemini-response {
+  font-size: 15px;
+  line-height: 1.7;
+  color: hsl(0 0% 87%);
+}
+.gemini-response p { margin: 0 0 12px 0; }
+.gemini-response p:last-child { margin-bottom: 0; }
+.gemini-response h1, .gemini-response h2, .gemini-response h3 {
+  color: white;
+  font-weight: 600;
+  margin: 16px 0 8px;
+}
+.gemini-response code {
+  background: rgba(255,255,255,0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'Courier New', monospace;
+}
+.gemini-response pre {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+.gemini-response pre code {
+  background: none;
+  padding: 0;
+}
+.gemini-response ul, .gemini-response ol {
+  padding-left: 20px;
+  margin: 8px 0;
+}
+.gemini-response li { margin: 4px 0; }
+.gemini-response strong { color: white; }
+.gemini-response a { color: hsl(217 91% 70%); text-decoration: none; }
+.gemini-response a:hover { text-decoration: underline; }
+.gemini-response blockquote {
+  border-left: 3px solid rgba(255,255,255,0.2);
+  padding-left: 16px;
+  margin: 12px 0;
+  color: hsl(0 0% 65%);
+  font-style: italic;
+}
+.gemini-response table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+}
+.gemini-response th, .gemini-response td {
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 8px 12px;
+  text-align: left;
+}
+.gemini-response th {
+  background: rgba(255,255,255,0.06);
+  font-weight: 600;
 }
