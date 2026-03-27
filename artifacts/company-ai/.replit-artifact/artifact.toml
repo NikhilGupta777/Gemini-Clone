@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Company AI Assistant"
+version = "1.0.0"
+id = "artifacts/company-ai"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18611
+
+[services.development]
+run = "pnpm --filter @workspace/company-ai run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/company-ai", "run", "build" ]
+publicDir = "artifacts/company-ai/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18611"
+BASE_PATH = "/"
