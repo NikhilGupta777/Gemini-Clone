@@ -151,8 +151,8 @@ export default function Dashboard({ frame, connected }: Props) {
           </h1>
           <p style={{ color: "#475569", fontSize: 13 }}>
             {sourceMode === "video"
-              ? `Real-time detection · YOLOv8 + SORT Tracking · VIDEO MODE`
-              : "Real-time anomaly detection · YOLOv8 + SORT Tracking Simulation"}
+              ? "Real detection · YOLOv4-tiny + SORT Tracking · VIDEO MODE"
+              : "Simulation mode · Anomaly detection engine running"}
           </p>
         </div>
 
@@ -223,18 +223,18 @@ export default function Dashboard({ frame, connected }: Props) {
           borderRadius: 14, padding: 20, marginBottom: 20,
         }}>
           <div style={{ fontSize: 9, color: "#a855f7", letterSpacing: 2, fontWeight: 700, marginBottom: 14 }}>
-            YOLOv8 VIDEO DETECTION
+            YOLOv4-TINY REAL DETECTION · OPENCV DNN + SORT TRACKING
           </div>
 
           {/* Model status */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 11 }}>
             {videoStatus?.model_ready ? (
-              <><CheckCircle size={13} color="#10b981" /><span style={{ color: "#10b981" }}>YOLOv8n model ready</span></>
+              <><CheckCircle size={13} color="#10b981" /><span style={{ color: "#10b981" }}>YOLOv4-tiny model ready (~23 MB)</span></>
             ) : videoStatus?.model_error ? (
               <><span style={{ color: "#ef4444" }}>Model error: {videoStatus.model_error}</span></>
             ) : (
               <><Loader size={13} color="#f59e0b" style={{ animation: "spin 1s linear infinite" }} />
-              <span style={{ color: "#f59e0b" }}>Downloading YOLOv8n model (~12 MB)…</span></>
+              <span style={{ color: "#f59e0b" }}>Downloading YOLOv4-tiny model (~23 MB)…</span></>
             )}
           </div>
 

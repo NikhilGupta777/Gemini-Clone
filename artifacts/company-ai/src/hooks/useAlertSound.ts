@@ -8,17 +8,21 @@ function playTone(
   vol: number,
   delayMs = 0
 ) {
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  osc.type = "square";
-  osc.frequency.value = freq;
-  const start = ctx.currentTime + delayMs / 1000;
-  gain.gain.setValueAtTime(vol, start);
-  gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
-  osc.start(start);
-  osc.stop(start + duration + 0.05);
+  try {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "square";
+    osc.frequency.value = freq;
+    const start = ctx.currentTime + delayMs / 1000;
+    gain.gain.setValueAtTime(vol, start);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
+    osc.start(start);
+    osc.stop(start + duration + 0.05);
+  } catch {
+    // AudioContext may be suspended; play() called below will resume it
+  }
 }
 
 const COOLDOWN_MS = 2000;
@@ -27,6 +31,21 @@ export function useAlertSound(anomalies: Anomaly[], enabled = true) {
   const ctxRef = useRef<AudioContext | null>(null);
   const lastTypeSetRef = useRef<Set<string>>(new Set());
   const lastPlayedRef = useRef<Record<string, number>>({});
+
+  // Resume AudioContext on any user interaction (browser autoplay policy)
+  useEffect(() => {
+    const resume = () => {
+      if (ctxRef.current && ctxRef.current.state === "suspended") {
+        ctxRef.current.resume();
+      }
+    };
+    document.addEventListener("click", resume, { once: false });
+    document.addEventListener("keydown", resume, { once: false });
+    return () => {
+      document.removeEventListener("click", resume);
+      document.removeEventListener("keydown", resume);
+    };
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;
@@ -40,21 +59,29 @@ export function useAlertSound(anomalies: Anomaly[], enabled = true) {
       const cooledDown = now - lastPlayed > COOLDOWN_MS;
 
       if (!alreadyActive && cooledDown) {
+        // Lazy-create AudioContext on first alert (requires user gesture first)
         if (!ctxRef.current) {
-          ctxRef.current = new (window.AudioContext ||
-            (window as any).webkitAudioContext)();
+          try {
+            ctxRef.current = new (window.AudioContext ||
+              (window as any).webkitAudioContext)();
+          } catch {
+            // AudioContext not supported
+          }
         }
         const ctx = ctxRef.current;
+        if (!ctx) continue;
+
+        // Resume if suspended (browser policy)
+        if (ctx.state === "suspended") {
+          ctx.resume().catch(() => {});
+        }
 
         if (type === "running") {
-          // Two sharp high beeps — matches original winsound.Beep(1000, 200)
           playTone(ctx, 1000, 0.2, 0.25, 0);
           playTone(ctx, 1200, 0.15, 0.2, 260);
         } else if (type === "unattended_object") {
-          // Single medium beep
           playTone(ctx, 800, 0.3, 0.25, 0);
         } else if (type === "overcrowding") {
-          // Lower warning tone
           playTone(ctx, 600, 0.4, 0.15, 0);
         }
 

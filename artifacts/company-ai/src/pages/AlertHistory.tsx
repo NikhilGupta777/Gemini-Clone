@@ -53,16 +53,23 @@ function exportCSV(alerts: AlertRecord[]) {
   URL.revokeObjectURL(url);
 }
 
-function buildChartData(alerts: AlertRecord[]) {
+interface ChartBucket {
+  time: string;
+  running: number;
+  unattended_object: number;
+  overcrowding: number;
+}
+
+function buildChartData(alerts: AlertRecord[]): ChartBucket[] {
   if (alerts.length === 0) return [];
-  const buckets: Record<string, Record<string, number>> = {};
+  const buckets: Record<string, ChartBucket> = {};
   const now = Date.now() / 1000;
   const range = 600; // last 10 minutes in 1-min buckets
 
   for (let i = 0; i < 10; i++) {
     const t = Math.floor((now - (9 - i) * 60) / 60) * 60;
     const label = new Date(t * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-    buckets[label] = { running: 0, unattended_object: 0, overcrowding: 0 };
+    buckets[label] = { time: label, running: 0, unattended_object: 0, overcrowding: 0 };
   }
 
   for (const r of alerts) {

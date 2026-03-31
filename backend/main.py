@@ -5,9 +5,7 @@ import time
 import threading
 from collections import deque
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
 
-import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -46,6 +44,7 @@ _start_time = time.time()
 _frame_times: deque = deque(maxlen=30)
 _alert_cooldowns: dict = {}
 _ALERT_COOLDOWN_SECS = 5.0
+_alert_id_counter = 0
 
 # ─── Video mode state ────────────────────────────────────────────────────────
 
@@ -111,10 +110,12 @@ def build_frame_payload(tracks: list, anomalies: list, now: float) -> dict:
             sa["position"] = [float(pos[0]), float(pos[1])]
         serializable_anomalies.append(sa)
 
+    global _alert_id_counter
     for a in serializable_anomalies:
         if _should_record_alert(a, now):
+            _alert_id_counter += 1
             alert_history.append({
-                "id": int(now * 1000),
+                "id": _alert_id_counter,
                 "anomaly": a,
                 "timestamp": now,
                 "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
