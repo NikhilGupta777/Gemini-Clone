@@ -126,7 +126,7 @@ export default function StatsCards({ stats, anomalyCount }: Props) {
         icon={Clock}
         value={formatUptime(stats?.uptime_seconds ?? 0)}
         color="#10b981"
-        sub="Detection engine running"
+        sub={`${stats?.fps ?? 0} FPS · Detection engine running`}
       />
     </div>
   );

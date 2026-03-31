@@ -40,6 +40,7 @@ class AnomalyDetector:
                     anomalies.append({
                         "type": "running",
                         "track_id": track_id,
+                        "avg_speed": round(avg_speed, 1),
                         "position": [cx, cy]
                     })
 

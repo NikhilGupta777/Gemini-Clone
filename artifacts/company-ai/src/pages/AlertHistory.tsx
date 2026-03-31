@@ -8,6 +8,7 @@ interface AlertRecord {
     track_id?: number;
     count?: number;
     duration?: number;
+    avg_speed?: number;
     position: [number, number] | null;
   };
   timestamp: number;
@@ -237,6 +238,11 @@ export default function AlertHistory() {
                     <td style={{ padding: "11px 18px", color: "#64748b", fontSize: 12 }}>
                       {record.anomaly.track_id !== undefined && `Track #${record.anomaly.track_id}`}
                       {record.anomaly.count !== undefined && ` ${record.anomaly.count} people`}
+                      {record.anomaly.avg_speed !== undefined && (
+                        <span style={{ color: "#a855f7", fontWeight: 600, marginLeft: 4 }}>
+                          · {record.anomaly.avg_speed} px/f
+                        </span>
+                      )}
                       {record.anomaly.duration !== undefined && ` · ${record.anomaly.duration}s`}
                     </td>
                     <td style={{ padding: "11px 18px", color: "#334155", fontSize: 11, fontFamily: "monospace" }}>

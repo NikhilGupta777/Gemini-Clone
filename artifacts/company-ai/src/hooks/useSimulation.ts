@@ -16,6 +16,7 @@ export interface Anomaly {
   track_id?: number;
   count?: number;
   duration?: number;
+  avg_speed?: number;
   position: [number, number] | null;
 }
 

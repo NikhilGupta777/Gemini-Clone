@@ -125,6 +125,9 @@ export default function AlertsFeed({ anomalies }: Props) {
                   {a.count !== undefined && (
                     <span style={{ fontSize: 10, color: "#64748b" }}>{a.count} people</span>
                   )}
+                  {a.avg_speed !== undefined && (
+                    <span style={{ fontSize: 10, color: "#a855f7", fontWeight: 600 }}>{a.avg_speed} px/f</span>
+                  )}
                   {a.duration !== undefined && (
                     <span style={{ fontSize: 10, color: "#64748b" }}>{a.duration}s elapsed</span>
                   )}

@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 from collections import deque
+from contextlib import asynccontextmanager
 from typing import Any
 
 import numpy as np
@@ -14,16 +15,6 @@ from backend.simulation import SimulationEngine
 from backend.config import (
     OVERCROWDING_THRESHOLD, RUNNING_SPEED_THRESHOLD,
     UNATTENDED_OBJECT_TIME, STATIONARY_THRESHOLD
-)
-
-app = FastAPI(title="CrowdLens API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 simulation = SimulationEngine()
@@ -42,22 +33,49 @@ stats_snapshot = {
     "person_count": 0,
     "object_count": 0,
     "anomaly_count": 0,
-    "fps": 10,
+    "fps": 0,
     "uptime_seconds": 0,
 }
 
 _start_time = time.time()
 
+# Cooldown tracking: (type, track_id_or_None) -> last alert timestamp
+_alert_cooldowns: dict = {}
+_ALERT_COOLDOWN_SECS = 5.0
 
-def build_frame_payload(tracks: list, anomalies: list) -> dict:
+# FPS tracking
+_frame_times: deque = deque(maxlen=30)
+
+
+def _should_record_alert(anomaly: dict, now: float) -> bool:
+    a_type = anomaly.get("type")
+    track_id = anomaly.get("track_id")
+    key = (a_type, track_id)
+    last = _alert_cooldowns.get(key, 0)
+    if now - last >= _ALERT_COOLDOWN_SECS:
+        _alert_cooldowns[key] = now
+        return True
+    return False
+
+
+def build_frame_payload(tracks: list, anomalies: list, now: float) -> dict:
     person_count = sum(1 for t in tracks if t["class_id"] == 0)
     object_count = sum(1 for t in tracks if t["class_id"] != 0)
+
+    # Compute actual FPS from rolling frame timestamps
+    _frame_times.append(now)
+    if len(_frame_times) >= 2:
+        elapsed = _frame_times[-1] - _frame_times[0]
+        fps = round((len(_frame_times) - 1) / elapsed) if elapsed > 0 else 0
+    else:
+        fps = 0
 
     stats_snapshot.update({
         "person_count": person_count,
         "object_count": object_count,
         "anomaly_count": len(anomalies),
-        "uptime_seconds": round(time.time() - _start_time),
+        "fps": fps,
+        "uptime_seconds": round(now - _start_time),
     })
 
     serializable_anomalies = []
@@ -68,21 +86,21 @@ def build_frame_payload(tracks: list, anomalies: list) -> dict:
             sa["position"] = [float(pos[0]), float(pos[1])]
         serializable_anomalies.append(sa)
 
+    # Record new alerts with cooldown deduplication per (type, track_id)
     for a in serializable_anomalies:
-        if a not in [h["anomaly"] for h in list(alert_history)[-5:]]:
-            ts = time.time()
+        if _should_record_alert(a, now):
             alert_history.append({
-                "id": int(ts * 1000),
+                "id": int(now * 1000),
                 "anomaly": a,
-                "timestamp": ts,
-                "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+                "timestamp": now,
+                "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
             })
 
     return {
         "tracks": tracks,
         "anomalies": serializable_anomalies,
         "stats": stats_snapshot.copy(),
-        "timestamp": time.time(),
+        "timestamp": now,
     }
 
 
@@ -106,8 +124,9 @@ async def simulation_loop():
             am.UNATTENDED_OBJECT_TIME = current_config["unattended_object_time"]
             am.STATIONARY_THRESHOLD = current_config["stationary_threshold"]
 
-            anomalies = detector.update(tracks, time.time())
-            payload = build_frame_payload(tracks, anomalies)
+            now = time.time()
+            anomalies = detector.update(tracks, now)
+            payload = build_frame_payload(tracks, anomalies, now)
             message = json.dumps(payload)
 
             dead = []
@@ -123,9 +142,26 @@ async def simulation_loop():
         await asyncio.sleep(max(0, interval - elapsed))
 
 
-@app.on_event("startup")
-async def startup():
-    asyncio.create_task(simulation_loop())
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(simulation_loop())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(title="CrowdLens API", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/api/health")
