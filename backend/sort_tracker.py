@@ -1,0 +1,227 @@
+"""
+SORT: Simple Online and Realtime Tracking
+Translated from the original SORT paper implementation.
+Uses Kalman filtering (filterpy) + Hungarian algorithm (scipy).
+"""
+import numpy as np
+from scipy.optimize import linear_sum_assignment
+from filterpy.kalman import KalmanFilter
+
+
+def _box_to_z(bbox):
+    """Convert [x1,y1,x2,y2] to Kalman state [cx, cy, area, aspect_ratio]."""
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+    cx = bbox[0] + w / 2.0
+    cy = bbox[1] + h / 2.0
+    s = w * h
+    r = w / float(h + 1e-6)
+    return np.array([[cx], [cy], [s], [r]])
+
+
+def _z_to_box(x):
+    """Convert Kalman state back to [x1, y1, x2, y2]."""
+    w = np.sqrt(abs(x[2] * x[3]))
+    h = x[2] / (w + 1e-6)
+    return np.array([
+        x[0] - w / 2.0,
+        x[1] - h / 2.0,
+        x[0] + w / 2.0,
+        x[1] + h / 2.0,
+    ]).flatten()
+
+
+def _iou(b1, b2):
+    """Compute IoU between two boxes [x1,y1,x2,y2]."""
+    xx1 = max(b1[0], b2[0])
+    yy1 = max(b1[1], b2[1])
+    xx2 = min(b1[2], b2[2])
+    yy2 = min(b1[3], b2[3])
+    inter = max(0.0, xx2 - xx1) * max(0.0, yy2 - yy1)
+    a1 = (b1[2] - b1[0]) * (b1[3] - b1[1])
+    a2 = (b2[2] - b2[0]) * (b2[3] - b2[1])
+    return inter / (a1 + a2 - inter + 1e-6)
+
+
+def _associate(detections, predictions, iou_threshold=0.3):
+    """
+    Match detections to existing trackers via Hungarian algorithm.
+    Returns: (matches, unmatched_dets, unmatched_trks)
+    """
+    if len(predictions) == 0:
+        return [], list(range(len(detections))), []
+    if len(detections) == 0:
+        return [], [], list(range(len(predictions)))
+
+    cost = np.zeros((len(detections), len(predictions)))
+    for d, det in enumerate(detections):
+        for t, pred in enumerate(predictions):
+            cost[d, t] = 1.0 - _iou(det, pred)
+
+    row_ind, col_ind = linear_sum_assignment(cost)
+
+    matches, unmatched_d, unmatched_t = [], [], []
+    matched_d, matched_t = set(), set()
+
+    for r, c in zip(row_ind, col_ind):
+        if cost[r, c] < 1.0 - iou_threshold:
+            matches.append((r, c))
+            matched_d.add(r)
+            matched_t.add(c)
+        else:
+            unmatched_d.append(r)
+            unmatched_t.append(c)
+
+    for d in range(len(detections)):
+        if d not in matched_d:
+            unmatched_d.append(d)
+    for t in range(len(predictions)):
+        if t not in matched_t:
+            unmatched_t.append(t)
+
+    return matches, unmatched_d, unmatched_t
+
+
+class KalmanBoxTracker:
+    """Single object tracked with a Kalman filter. State: [cx,cy,s,r,vcx,vcy,vs]."""
+
+    _count = 0
+
+    def __init__(self, bbox: list, class_id: int, confidence: float):
+        self.kf = KalmanFilter(dim_x=7, dim_z=4)
+        # State transition
+        self.kf.F = np.array([
+            [1, 0, 0, 0, 1, 0, 0],
+            [0, 1, 0, 0, 0, 1, 0],
+            [0, 0, 1, 0, 0, 0, 1],
+            [0, 0, 0, 1, 0, 0, 0],
+            [0, 0, 0, 0, 1, 0, 0],
+            [0, 0, 0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 0, 0, 1],
+        ], dtype=float)
+        # Measurement matrix
+        self.kf.H = np.array([
+            [1, 0, 0, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0, 0],
+            [0, 0, 0, 1, 0, 0, 0],
+        ], dtype=float)
+        self.kf.R[2:, 2:] *= 10.0
+        self.kf.P[4:, 4:] *= 1000.0
+        self.kf.P *= 10.0
+        self.kf.Q[-1, -1] *= 0.01
+        self.kf.Q[4:, 4:] *= 0.01
+        self.kf.x[:4] = _box_to_z(bbox)
+
+        self.id = KalmanBoxTracker._count + 1
+        KalmanBoxTracker._count += 1
+
+        self.class_id = class_id
+        self.confidence = confidence
+        self.hits = 1
+        self.hit_streak = 1
+        self.age = 0
+        self.time_since_update = 0
+
+    def predict(self):
+        if self.kf.x[6] + self.kf.x[2] <= 0:
+            self.kf.x[6] = 0.0
+        self.kf.predict()
+        self.age += 1
+        if self.time_since_update > 0:
+            self.hit_streak = 0
+        self.time_since_update += 1
+        return _z_to_box(self.kf.x)
+
+    def update(self, bbox: list, class_id: int, confidence: float):
+        self.time_since_update = 0
+        self.hits += 1
+        self.hit_streak += 1
+        self.class_id = class_id
+        self.confidence = confidence
+        self.kf.update(_box_to_z(bbox))
+
+    def get_box(self):
+        return _z_to_box(self.kf.x)
+
+
+class Sort:
+    """
+    SORT multi-object tracker.
+    max_age: frames to keep a tracker alive without a match.
+    min_hits: min matches before reporting a track (reduces false positives).
+    iou_threshold: min IoU to consider a detection-tracker match.
+    """
+
+    def __init__(self, max_age: int = 3, min_hits: int = 2, iou_threshold: float = 0.3):
+        self.max_age = max_age
+        self.min_hits = min_hits
+        self.iou_threshold = iou_threshold
+        self.trackers: list[KalmanBoxTracker] = []
+        self.frame_count = 0
+
+    def update(self, detections: list[dict]) -> list[dict]:
+        """
+        detections: [{"bbox": [x1,y1,x2,y2], "class_id": int, "confidence": float}]
+        Returns: [{"id": int, "bbox": [x1,y1,x2,y2], "class_id": int, "confidence": float}]
+        """
+        self.frame_count += 1
+
+        # Predict step
+        predictions = []
+        dead = []
+        for i, trk in enumerate(self.trackers):
+            pred = trk.predict()
+            if np.any(np.isnan(pred)):
+                dead.append(i)
+            else:
+                predictions.append(pred.tolist())
+        for i in reversed(dead):
+            self.trackers.pop(i)
+
+        det_boxes = [d["bbox"] for d in detections]
+        matches, unmatched_dets, unmatched_trks = _associate(
+            det_boxes, predictions, self.iou_threshold
+        )
+
+        # Update matched
+        for d_idx, t_idx in matches:
+            self.trackers[t_idx].update(
+                detections[d_idx]["bbox"],
+                detections[d_idx]["class_id"],
+                detections[d_idx]["confidence"],
+            )
+
+        # Create new trackers
+        for d_idx in unmatched_dets:
+            self.trackers.append(
+                KalmanBoxTracker(
+                    detections[d_idx]["bbox"],
+                    detections[d_idx]["class_id"],
+                    detections[d_idx]["confidence"],
+                )
+            )
+
+        # Collect active tracks
+        active = []
+        for trk in self.trackers:
+            if trk.time_since_update < 1 and (
+                trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits
+            ):
+                box = trk.get_box().tolist()
+                active.append({
+                    "id": trk.id,
+                    "bbox": box,
+                    "class_id": trk.class_id,
+                    "confidence": trk.confidence,
+                })
+
+        # Prune dead trackers
+        self.trackers = [t for t in self.trackers if t.time_since_update <= self.max_age]
+
+        return active
+
+    def reset(self):
+        self.trackers = []
+        self.frame_count = 0
+        KalmanBoxTracker._count = 0

@@ -64,4 +64,4 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
-packages = ["libxcrypt"]
+packages = ["libGL", "libGLU", "libxcrypt", "oneDNN", "pkg-config", "re2", "xsimd"]

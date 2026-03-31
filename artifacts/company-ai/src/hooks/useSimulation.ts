@@ -9,6 +9,8 @@ export interface Track {
   class_id: number;
   class_name: string;
   running: boolean;
+  confidence?: number;   // real value from YOLOv8, undefined in simulation
+  zone?: "A" | "B" | "C";
 }
 
 export interface Anomaly {
@@ -33,6 +35,7 @@ export interface FrameData {
   anomalies: Anomaly[];
   stats: SimStats;
   timestamp: number;
+  mode?: "simulation" | "video";
 }
 
 function getWsUrl() {
