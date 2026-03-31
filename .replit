@@ -31,12 +31,12 @@ name = "Start application"
 author = "agent"
 
 [workflows.workflow.metadata]
-outputType = "webview"
+outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "PORT=18611 BASE_PATH=/ pnpm --filter @workspace/company-ai run dev & uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload"
-waitForPort = 18611
+args = "uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload"
+waitForPort = 8080
 
 [agent]
 stack = "PNPM_WORKSPACE"
