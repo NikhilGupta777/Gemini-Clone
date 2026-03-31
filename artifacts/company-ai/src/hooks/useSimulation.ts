@@ -1,0 +1,87 @@
+import { useEffect, useRef, useState, useCallback } from "react";
+
+export interface Track {
+  id: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  class_id: number;
+  class_name: string;
+  running: boolean;
+}
+
+export interface Anomaly {
+  type: "running" | "unattended_object" | "overcrowding";
+  track_id?: number;
+  count?: number;
+  duration?: number;
+  position: [number, number] | null;
+}
+
+export interface SimStats {
+  person_count: number;
+  object_count: number;
+  anomaly_count: number;
+  fps: number;
+  uptime_seconds: number;
+}
+
+export interface FrameData {
+  tracks: Track[];
+  anomalies: Anomaly[];
+  stats: SimStats;
+  timestamp: number;
+}
+
+function getWsUrl() {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/ws`;
+}
+
+export function useSimulation() {
+  const [frame, setFrame] = useState<FrameData | null>(null);
+  const [connected, setConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const connect = useCallback(() => {
+    try {
+      const ws = new WebSocket(getWsUrl());
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setConnected(true);
+        if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const data: FrameData = JSON.parse(e.data);
+          setFrame(data);
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        setConnected(false);
+        reconnectRef.current = setTimeout(connect, 2000);
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+    } catch {
+      reconnectRef.current = setTimeout(connect, 2000);
+    }
+  }, []);
+
+  useEffect(() => {
+    connect();
+    return () => {
+      if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      wsRef.current?.close();
+    };
+  }, [connect]);
+
+  return { frame, connected };
+}

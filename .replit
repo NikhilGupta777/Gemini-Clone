@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-24", "python-3.11"]
 
 [[artifacts]]
 id = "artifacts/api-server"
@@ -35,7 +35,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "PORT=18611 BASE_PATH=/ pnpm --filter @workspace/company-ai run dev & PORT=8080 pnpm --filter @workspace/api-server run dev"
+args = "PORT=18611 BASE_PATH=/ pnpm --filter @workspace/company-ai run dev & uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload"
 waitForPort = 18611
 
 [agent]
@@ -45,3 +45,7 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[nix]
+channel = "stable-25_05"
+packages = ["libxcrypt"]

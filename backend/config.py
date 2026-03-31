@@ -1,0 +1,18 @@
+FRAME_WIDTH = 1280
+FRAME_HEIGHT = 720
+
+OVERCROWDING_THRESHOLD = 2
+RUNNING_SPEED_THRESHOLD = 20.0
+UNATTENDED_OBJECT_TIME = 5.0
+STATIONARY_THRESHOLD = 150.0
+
+UNATTENDED_CLASSES = [24, 26, 28, 39, 41, 67, 73]
+
+MAX_AGE = 50
+MIN_HITS = 3
+IOU_THRESHOLD = 0.3
+
+COCO_CLASSES = {
+    0: "person", 24: "backpack", 26: "handbag", 28: "suitcase",
+    39: "bottle", 41: "cup", 67: "cell phone", 73: "book"
+}
