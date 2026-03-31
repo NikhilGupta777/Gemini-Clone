@@ -224,8 +224,9 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
-    background: #0f172a;
+    background: #060a12;
     color: #e2e8f0;
+    overflow-x: hidden;
   }
 
   ::-webkit-scrollbar {

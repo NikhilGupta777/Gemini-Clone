@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Zap, AlertCircle, Users, RefreshCw, Filter } from "lucide-react";
 
 interface AlertRecord {
   id: number;
@@ -13,162 +14,235 @@ interface AlertRecord {
   iso: string;
 }
 
-const TYPE_META: Record<string, { color: string; icon: string; label: string }> = {
-  running: { color: "#a855f7", icon: "⚡", label: "Running Detected" },
-  unattended_object: { color: "#ef4444", icon: "🚨", label: "Unattended Object" },
-  overcrowding: { color: "#f97316", icon: "⚠", label: "Overcrowding" },
+const TYPE_META: Record<string, { color: string; Icon: typeof Zap; label: string; severity: string }> = {
+  running:           { color: "#a855f7", Icon: Zap,         label: "Running",          severity: "CRITICAL" },
+  unattended_object: { color: "#ef4444", Icon: AlertCircle, label: "Unattended Object", severity: "HIGH"     },
+  overcrowding:      { color: "#f97316", Icon: Users,       label: "Overcrowding",      severity: "MEDIUM"   },
 };
 
 export default function AlertHistory() {
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const fetchHistory = async () => {
+  const fetchHistory = async (showRefreshing = false) => {
+    if (showRefreshing) setRefreshing(true);
     try {
       const res = await fetch("/api/alerts/history?limit=200");
       const data = await res.json();
       setAlerts(data.alerts || []);
     } catch {}
     setLoading(false);
+    setRefreshing(false);
   };
 
   useEffect(() => {
     fetchHistory();
-    const interval = setInterval(fetchHistory, 2000);
+    const interval = setInterval(() => fetchHistory(), 3000);
     return () => clearInterval(interval);
   }, []);
 
-  const filtered = filter === "all" ? alerts : alerts.filter((a) => a.anomaly.type === filter);
+  const filtered = filter === "all" ? alerts : alerts.filter(a => a.anomaly.type === filter);
 
   const counts = alerts.reduce<Record<string, number>>((acc, a) => {
     acc[a.anomaly.type] = (acc[a.anomaly.type] || 0) + 1;
     return acc;
   }, {});
 
+  const summaryCards = Object.entries(TYPE_META).map(([type, meta]) => ({
+    type, ...meta, count: counts[type] ?? 0,
+  }));
+
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f1f5f9", letterSpacing: 1 }}>
-          Alert History
-        </h1>
-        <p style={{ color: "#475569", fontSize: 13, marginTop: 4 }}>
-          Full incident log with timestamps
-        </p>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f1f5f9", letterSpacing: -0.5, marginBottom: 4 }}>
+            Alert History
+          </h1>
+          <p style={{ color: "#475569", fontSize: 13 }}>
+            Full incident log · {alerts.length} total events recorded
+          </p>
+        </div>
+        <button
+          onClick={() => fetchHistory(true)}
+          style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "8px 16px", borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.1)",
+            background: "rgba(255,255,255,0.04)",
+            color: "#64748b", cursor: "pointer", fontSize: 12,
+          }}
+        >
+          <RefreshCw size={13} style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }} />
+          Refresh
+        </button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
-        {Object.entries(TYPE_META).map(([type, meta]) => (
+      {/* Summary cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 24 }}>
+        {summaryCards.map(({ type, color, Icon, label, count, severity }) => (
           <div
             key={type}
             style={{
-              background: "#1e293b",
-              borderRadius: 10,
-              padding: "14px 18px",
-              borderLeft: `4px solid ${meta.color}`,
+              background: "rgba(255,255,255,0.025)",
+              border: `1px solid rgba(255,255,255,0.07)`,
+              borderRadius: 14,
+              padding: "18px 20px",
+              borderLeft: `3px solid ${color}`,
+              cursor: "pointer",
+              transition: "border-color 0.2s",
             }}
+            onClick={() => setFilter(filter === type ? "all" : type)}
           >
-            <div style={{ fontSize: 11, color: "#64748b", letterSpacing: 1, marginBottom: 4 }}>
-              {meta.label.toUpperCase()}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div style={{ fontSize: 9, color: "#475569", letterSpacing: 2, fontWeight: 700 }}>
+                {label.toUpperCase()}
+              </div>
+              <div style={{ background: color + "18", borderRadius: 8, padding: 5 }}>
+                <Icon size={13} color={color} />
+              </div>
             </div>
-            <div style={{ fontSize: 32, fontWeight: 800, color: meta.color }}>{counts[type] ?? 0}</div>
+            <div style={{
+              fontSize: 40, fontWeight: 800, color,
+              lineHeight: 1, textShadow: `0 0 20px ${color}55`,
+            }}>
+              {count}
+            </div>
+            <div style={{ fontSize: 10, color: "#334155", marginTop: 8, fontWeight: 600, letterSpacing: 1 }}>
+              {severity}
+            </div>
           </div>
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        {["all", "running", "unattended_object", "overcrowding"].map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 6,
-              border: "1px solid",
-              borderColor: filter === f ? "#3b82f6" : "#334155",
-              background: filter === f ? "rgba(59,130,246,0.15)" : "transparent",
-              color: filter === f ? "#60a5fa" : "#64748b",
-              cursor: "pointer",
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
-            {f === "all" ? "All" : TYPE_META[f]?.label ?? f}
-          </button>
-        ))}
-        <button
-          onClick={fetchHistory}
-          style={{
-            marginLeft: "auto",
-            padding: "6px 14px",
-            borderRadius: 6,
-            border: "1px solid #334155",
-            background: "transparent",
-            color: "#64748b",
-            cursor: "pointer",
-            fontSize: 12,
-          }}
-        >
-          ↻ Refresh
-        </button>
+      {/* Filters */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+        <Filter size={13} color="#475569" />
+        {["all", "running", "unattended_object", "overcrowding"].map(f => {
+          const meta = TYPE_META[f as keyof typeof TYPE_META];
+          const active = filter === f;
+          return (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              style={{
+                padding: "6px 14px", borderRadius: 8,
+                border: "1px solid",
+                borderColor: active ? (meta?.color ?? "#3b82f6") : "rgba(255,255,255,0.08)",
+                background: active ? (meta?.color ?? "#3b82f6") + "18" : "rgba(255,255,255,0.03)",
+                color: active ? (meta?.color ?? "#3b82f6") : "#64748b",
+                cursor: "pointer", fontSize: 12, fontWeight: 600,
+                transition: "all 0.18s",
+              }}
+            >
+              {f === "all" ? "All Events" : meta?.label ?? f}
+            </button>
+          );
+        })}
+        <div style={{ marginLeft: "auto", fontSize: 11, color: "#334155" }}>
+          {filtered.length} events
+        </div>
       </div>
 
-      <div style={{ background: "#1e293b", borderRadius: 12, overflow: "hidden" }}>
+      {/* Table */}
+      <div style={{
+        background: "rgba(255,255,255,0.025)",
+        border: "1px solid rgba(255,255,255,0.07)",
+        borderRadius: 14, overflow: "hidden",
+      }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
-            <tr style={{ background: "#0f172a", color: "#64748b", fontSize: 11, letterSpacing: 1 }}>
-              {["TIME", "TYPE", "DETAILS", "POSITION"].map((h) => (
-                <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontWeight: 700 }}>{h}</th>
+            <tr style={{
+              background: "rgba(0,0,0,0.3)",
+              color: "#334155",
+              fontSize: 9,
+              letterSpacing: 1.5,
+              fontWeight: 700,
+            }}>
+              {["TIME", "TYPE", "SEVERITY", "DETAILS", "POSITION"].map(h => (
+                <th key={h} style={{ padding: "12px 18px", textAlign: "left" }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={4} style={{ padding: 24, textAlign: "center", color: "#475569" }}>
-                  Loading…
+                <td colSpan={5} style={{ padding: 32, textAlign: "center", color: "#334155" }}>
+                  <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
+                    {[0,1,2].map(i => (
+                      <div key={i} style={{
+                        width: 8, height: 8, borderRadius: "50%", background: "#1e3a5f",
+                        animation: `bounce-dot 1.2s ${i*0.2}s infinite`,
+                      }} />
+                    ))}
+                  </div>
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={4} style={{ padding: 24, textAlign: "center", color: "#475569" }}>
-                  No alerts recorded yet
+                <td colSpan={5} style={{ padding: 32, textAlign: "center", color: "#334155", fontSize: 13 }}>
+                  No incidents recorded
                 </td>
               </tr>
             ) : (
               filtered.map((record, i) => {
-                const meta = TYPE_META[record.anomaly.type] ?? { color: "#fff", icon: "●", label: record.anomaly.type };
+                const meta = TYPE_META[record.anomaly.type] ?? {
+                  color: "#94a3b8", Icon: AlertCircle, label: record.anomaly.type, severity: "INFO",
+                };
+                const { Icon } = meta;
                 return (
                   <tr
                     key={record.id}
-                    style={{ borderTop: i > 0 ? "1px solid #334155" : "none" }}
+                    style={{
+                      borderTop: "1px solid rgba(255,255,255,0.04)",
+                      transition: "background 0.15s",
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.02)")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                   >
-                    <td style={{ padding: "10px 16px", color: "#94a3b8", whiteSpace: "nowrap" }}>
-                      {new Date(record.timestamp * 1000).toLocaleTimeString()}
+                    <td style={{ padding: "11px 18px", color: "#475569", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12 }}>
+                      {new Date(record.timestamp * 1000).toLocaleTimeString("en-IN")}
                     </td>
-                    <td style={{ padding: "10px 16px" }}>
-                      <span
-                        style={{
-                          background: meta.color + "22",
+                    <td style={{ padding: "11px 18px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Icon size={13} color={meta.color} />
+                        <span style={{
+                          background: meta.color + "18",
                           color: meta.color,
                           padding: "3px 10px",
                           borderRadius: 20,
                           fontSize: 11,
                           fontWeight: 700,
-                        }}
-                      >
-                        {meta.icon} {meta.label}
+                        }}>
+                          {meta.label}
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ padding: "11px 18px" }}>
+                      <span style={{
+                        background: "rgba(255,255,255,0.04)",
+                        color: "#64748b",
+                        padding: "2px 8px",
+                        borderRadius: 6,
+                        fontSize: 9,
+                        fontWeight: 800,
+                        letterSpacing: 1,
+                      }}>
+                        {meta.severity}
                       </span>
                     </td>
-                    <td style={{ padding: "10px 16px", color: "#94a3b8", fontSize: 12 }}>
+                    <td style={{ padding: "11px 18px", color: "#64748b", fontSize: 12 }}>
                       {record.anomaly.track_id !== undefined && `Track #${record.anomaly.track_id}`}
-                      {record.anomaly.count !== undefined && `${record.anomaly.count} people`}
+                      {record.anomaly.count !== undefined && ` ${record.anomaly.count} people`}
                       {record.anomaly.duration !== undefined && ` · ${record.anomaly.duration}s`}
                     </td>
-                    <td style={{ padding: "10px 16px", color: "#475569", fontSize: 11, fontFamily: "monospace" }}>
+                    <td style={{ padding: "11px 18px", color: "#334155", fontSize: 11, fontFamily: "monospace" }}>
                       {record.anomaly.position
                         ? `(${Math.round(record.anomaly.position[0])}, ${Math.round(record.anomaly.position[1])})`
-                        : "—"}
+                        : <span style={{ color: "#1e3a5f" }}>—</span>}
                     </td>
                   </tr>
                 );
@@ -177,6 +251,14 @@ export default function AlertHistory() {
           </tbody>
         </table>
       </div>
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes bounce-dot {
+          0%, 80%, 100% { transform: scale(0.8); opacity: 0.4; }
+          40% { transform: scale(1.2); opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
