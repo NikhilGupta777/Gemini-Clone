@@ -1,108 +1,77 @@
-# Workspace
+# CrowdLens · Campus AI Monitor
 
 ## Overview
 
-pnpm workspace monorepo using TypeScript. Company AI Assistant — a Gemini-like chatbot for company knowledge.
+Full-stack surveillance and anomaly detection simulation system for a college project. A Python FastAPI backend simulates crowd movements and detects anomalies in real-time. A React + Vite frontend renders a live surveillance dashboard with WebSocket-powered bounding boxes, stats, and incident logs.
 
 ## Stack
 
 - **Monorepo tool**: pnpm workspaces
 - **Node.js version**: 24
-- **Package manager**: pnpm
-- **TypeScript version**: 5.9
-- **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
-- **Validation**: Zod (`zod/v4`), `drizzle-zod`
-- **API codegen**: Orval (from OpenAPI spec)
-- **Build**: esbuild (ESM bundle)
-- **AI**: Gemini (via Replit AI Integrations — no API key needed)
-- **Frontend**: React + Vite + TailwindCSS + shadcn/ui
+- **Python version**: 3.11
+- **Package manager**: pnpm + uv (Python)
+- **Frontend**: React 19 + Vite 7 + TailwindCSS v4 + shadcn/ui
+- **Backend**: Python FastAPI + uvicorn + WebSockets + numpy
+- **Real-time**: WebSocket (simulation frames at 10 fps)
+- **Routing**: wouter (frontend SPA)
 
 ## Features
 
-- Gemini-like chat interface with streaming responses
-- Conversation history (sidebar with past chats)
-- Knowledge base management — upload PDFs, TXT, CSV, DOCX files
-- RAG (Retrieval-Augmented Generation) — answers grounded in company documents
-- Markdown rendering for AI responses
+- **Live Surveillance Canvas** — Canvas2D rendering of tracked entities with bounding boxes, zone overlays (ZONE A/B/C), scan-line animation, REC indicator
+- **Anomaly Detection** — Three detection types:
+  - **Running** (purple) — person speed exceeds threshold
+  - **Unattended Object** (red) — object stationary for > N seconds
+  - **Overcrowding** (orange) — person count exceeds threshold
+- **Stats Cards** — Live occupancy, threat level (with pulse animation), total tracks, system uptime
+- **Alert History** — Full incident log table with timestamp, type, details, position; auto-refreshes every 2s
+- **Settings** — Real-time threshold tuning (overcrowding limit, running speed, unattended time, stationary distance) via sliders with live PUT to backend
+- **Threat Level Header** — SYSTEM SECURE / ALERT ACTIVE / THREAT DETECTED with blinking indicator
 
 ## Structure
 
-```text
-artifacts-monorepo/
-├── artifacts/
-│   ├── api-server/         # Express API server
-│   └── company-ai/         # React+Vite frontend (Gemini-like UI)
+```
+├── artifacts/company-ai/          # React+Vite surveillance dashboard
+│   ├── src/
+│   │   ├── App.tsx                # Root app, threat level logic
+│   │   ├── hooks/useSimulation.ts # WebSocket hook w/ auto-reconnect
+│   │   ├── pages/
+│   │   │   ├── Dashboard.tsx      # Main canvas + stats + alerts
+│   │   │   ├── AlertHistory.tsx   # Incident log table
+│   │   │   └── Settings.tsx       # Threshold configuration
+│   │   └── components/
+│   │       ├── Layout.tsx         # Sidebar nav + header
+│   │       ├── SimulationCanvas.tsx # Canvas2D rendering engine
+│   │       ├── StatsCards.tsx     # Live stat panels
+│   │       └── AlertsFeed.tsx     # Active incidents panel
+│   └── vite.config.ts             # Proxy /api + /ws → port 8080
+├── backend/
+│   ├── main.py                    # FastAPI app, WebSocket endpoint, REST API
+│   ├── simulation.py              # Entity simulation engine
+│   ├── anomaly.py                 # Anomaly detection logic
+│   └── config.py                  # Detection thresholds and COCO classes
 ├── lib/
-│   ├── api-spec/           # OpenAPI spec + Orval codegen config
-│   ├── api-client-react/   # Generated React Query hooks
-│   ├── api-zod/            # Generated Zod schemas from OpenAPI
-│   ├── db/                 # Drizzle ORM schema + DB connection
-│   └── integrations-gemini-ai/  # Gemini SDK client + image/batch utils
-├── scripts/                # Utility scripts
-├── pnpm-workspace.yaml
-├── tsconfig.base.json
-├── tsconfig.json
-└── package.json
+│   ├── api-client-react/          # (unused by CrowdLens, from prior scaffold)
+│   └── ...
 ```
 
-## Database Schema
+## Running
 
-- `conversations` — chat sessions (id, title, createdAt)
-- `messages` — chat messages (id, conversationId, role, content, createdAt)
-- `documents` — uploaded company documents (id, name, filename, size, mimeType, content, chunkCount, createdAt)
-- `document_chunks` — text chunks for RAG retrieval (id, documentId, chunkIndex, content)
+- **Frontend**: `artifacts/company-ai: web` workflow — Vite dev server on port 18611
+- **Backend**: `Start application` workflow — uvicorn on port 8080
+- Frontend proxies `/api` and `/ws` to the Python backend
 
-## API Routes
+## API Endpoints (Python FastAPI)
 
-All routes are under `/api`:
+- `GET /api/health` — health check
+- `GET /api/stats` — current simulation stats
+- `GET /api/alerts/history?limit=N` — incident log
+- `GET /api/config` — current detection thresholds
+- `PUT /api/config` — update thresholds (live, no restart needed)
+- `WS /ws` — real-time simulation frames at 10 fps
 
-- `GET /api/healthz` — health check
-- `GET /api/gemini/conversations` — list conversations
-- `POST /api/gemini/conversations` — create conversation
-- `GET /api/gemini/conversations/:id` — get conversation with messages
-- `DELETE /api/gemini/conversations/:id` — delete conversation
-- `PATCH /api/gemini/conversations/:id` — rename conversation
-- `GET /api/gemini/conversations/:id/messages` — list messages
-- `POST /api/gemini/conversations/:id/messages` — send message (SSE stream)
-- `GET /api/documents` — list documents
-- `POST /api/documents` — upload document (multipart/form-data)
-- `DELETE /api/documents/:id` — delete document
+## Detection Config Defaults
 
-## TypeScript & Composite Projects
-
-Every package extends `tsconfig.base.json` which sets `composite: true`. The root `tsconfig.json` lists all lib packages as project references.
-
-## Root Scripts
-
-- `pnpm run build` — runs `typecheck` first, then recursively runs `build` in all packages that define it
-- `pnpm run typecheck` — runs `tsc --build --emitDeclarationOnly` using project references
-
-## Packages
-
-### `artifacts/api-server` (`@workspace/api-server`)
-
-Express 5 API server with routes for Gemini chat and document management.
-
-- Depends on: `@workspace/db`, `@workspace/api-zod`, `@workspace/integrations-gemini-ai`
-- Uses multer for file uploads
-
-### `artifacts/company-ai` (`@workspace/company-ai`)
-
-React+Vite frontend with Gemini-like UI.
-
-- Uses wouter for routing
-- Uses @tanstack/react-query for data fetching
-- Uses react-markdown + remark-gfm for markdown rendering
-- Custom SSE streaming hook for chat responses
-
-### `lib/integrations-gemini-ai` (`@workspace/integrations-gemini-ai`)
-
-Gemini SDK client via Replit AI Integrations (no user API key required). Includes image generation and batch processing utilities.
-
-### `lib/db` (`@workspace/db`)
-
-Database layer using Drizzle ORM with PostgreSQL.
-
-- `drizzle.config.ts` — Drizzle Kit config (requires `DATABASE_URL`)
-- Run migrations: `pnpm --filter @workspace/db run push`
+- Overcrowding threshold: 2 people
+- Running speed threshold: 20 px/frame
+- Unattended object time: 5 seconds
+- Stationary distance: 150 px

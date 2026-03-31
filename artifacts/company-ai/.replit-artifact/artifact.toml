@@ -1,6 +1,6 @@
 kind = "web"
 previewPath = "/"
-title = "Company AI"
+title = "CrowdLens · Campus AI"
 version = "1.0.0"
 id = "artifacts/company-ai"
 router = "path"
@@ -11,7 +11,7 @@ version = "1.0.0"
 
 [[services]]
 name = "web"
-paths = [ "/" ]
+paths = [ "/", "/api", "/ws" ]
 localPort = 18611
 
 [services.development]
