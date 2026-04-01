@@ -100,13 +100,17 @@ export default function Dashboard() {
     return () => clearInterval(id);
   }, []);
 
-  // Poll stream status — stable interval, no side-effect mode changes
+  // Poll stream status — stable interval; auto-reset mode when stream errors out
   useEffect(() => {
     const poll = async () => {
       try {
         const res = await fetch("/api/stream/status");
         const data = await res.json();
         setStreamStatus(data);
+        // If backend says stream stopped with error, reset our UI state
+        if (data.error && !data.active) {
+          setSourceMode(prev => prev === "stream" ? "idle" : prev);
+        }
       } catch {}
     };
     poll();
@@ -506,6 +510,17 @@ export default function Dashboard() {
               <code style={{ color: "#f59e0b" }}>http://IP:PORT/video</code> — HTTP MJPEG camera<br />
               <code style={{ color: "#f59e0b" }}>rtsp://user:pass@IP:554/stream</code> — with authentication
             </div>
+            <button
+              onClick={() => setStreamUrl("http://localhost:8080/api/stream/test-feed")}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                marginBottom: 12, padding: "5px 12px", borderRadius: 6,
+                border: "1px solid rgba(16,185,129,0.3)", background: "rgba(16,185,129,0.08)",
+                color: "#10b981", fontSize: 11, fontWeight: 600, cursor: "pointer",
+              }}
+            >
+              ⚡ Fill built-in test stream URL
+            </button>
             <div style={{ display: "flex", gap: 8 }}>
               <div style={{ position: "relative", flex: 1 }}>
                 <Link size={13} color="#64748b" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />

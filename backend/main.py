@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import os
 import time
 import threading
@@ -9,6 +10,7 @@ from contextlib import asynccontextmanager
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.anomaly import AnomalyDetector
@@ -617,6 +619,63 @@ async def stop_webcam():
     _processing_mode = "idle"
     webcam_status["active"] = False
     return {"success": True}
+
+
+# ─── Built-in test MJPEG stream ───────────────────────────────────────────────
+
+async def _test_frame_generator():
+    """Generates synthetic MJPEG frames that cv2.VideoCapture can read.
+    Renders a dark scene with moving coloured rectangles at ~12 fps
+    so the stream pipeline can be tested without an external camera."""
+    import cv2
+    W, H = 1280, 720
+    fps_interval = 1 / 12
+
+    while True:
+        t = time.time()
+        frame = np.zeros((H, W, 3), dtype=np.uint8)
+
+        # Grid background
+        for x in range(0, W, 80):
+            cv2.line(frame, (x, 0), (x, H), (20, 30, 50), 1)
+        for y in range(0, H, 80):
+            cv2.line(frame, (0, y), (W, y), (20, 30, 50), 1)
+
+        # Three animated "people" (tall rectangles)
+        for i, (base_x, spd, col) in enumerate([
+            (200, 1.2, (80, 180, 80)),
+            (600, 0.9, (180, 80, 80)),
+            (1000, 1.5, (80, 80, 180)),
+        ]):
+            cx = int(base_x + 180 * math.sin(t * spd + i * 2))
+            cy = int(H // 2 + 60 * math.cos(t * 0.7 + i))
+            cv2.rectangle(frame, (cx - 30, cy - 70), (cx + 30, cy + 70), col, -1)
+            cv2.putText(frame, f"test-{i+1}", (cx - 28, cy - 78),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1)
+
+        # Timestamp overlay
+        ts = time.strftime("%H:%M:%S", time.localtime(t))
+        cv2.putText(frame, f"CrowdLens TEST STREAM  {ts}", (20, 36),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 180, 255), 2)
+
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n"
+            + buf.tobytes()
+            + b"\r\n"
+        )
+        await asyncio.sleep(fps_interval)
+
+
+@app.get("/api/stream/test-feed")
+async def test_feed():
+    """MJPEG stream endpoint for local pipeline testing.
+    Paste  http://localhost:8080/api/stream/test-feed  into the stream URL box."""
+    return StreamingResponse(
+        _test_frame_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 # ─── WebSocket: dashboard data broadcast ──────────────────────────────────────
