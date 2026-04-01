@@ -503,12 +503,20 @@ export default function Dashboard() {
 
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>
-              Enter any video stream URL — RTSP, HTTP, or an IP camera. Examples:
+              Enter a video stream or file URL. Examples:
+            </div>
+            <div style={{
+              fontSize: 11, color: "#92400e", background: "rgba(245,158,11,0.08)",
+              border: "1px solid rgba(245,158,11,0.2)", borderRadius: 7, padding: "7px 10px", marginBottom: 10,
+            }}>
+              ⚠ <strong style={{ color: "#f59e0b" }}>RTSP (port 554) is blocked</strong> in cloud environments.
+              Use <strong>HTTP/MJPEG</strong> or a public <strong>HTTP MP4 URL</strong> instead.
+              HTTP MP4 files will loop automatically.
             </div>
             <div style={{ fontSize: 10, color: "#334155", marginBottom: 10, lineHeight: 1.8 }}>
-              <code style={{ color: "#f59e0b" }}>rtsp://192.168.1.100:554/stream</code> — IP camera (RTSP)<br />
-              <code style={{ color: "#f59e0b" }}>http://IP:PORT/video</code> — HTTP MJPEG camera<br />
-              <code style={{ color: "#f59e0b" }}>rtsp://user:pass@IP:554/stream</code> — with authentication
+              <code style={{ color: "#10b981" }}>http://IP:PORT/video</code> — HTTP MJPEG camera ✓<br />
+              <code style={{ color: "#10b981" }}>https://example.com/video.mp4</code> — HTTP MP4 file (loops) ✓<br />
+              <code style={{ color: "#475569" }}>rtsp://192.168.1.100:554/stream</code> — RTSP (blocked in cloud) ✗
             </div>
             <button
               onClick={() => setStreamUrl("http://localhost:8080/api/stream/test-feed")}

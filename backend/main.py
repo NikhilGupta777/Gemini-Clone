@@ -280,8 +280,18 @@ async def video_processing_loop():
 # ─── Stream processing loop (RTSP / HTTP / IP camera) ─────────────────────────
 
 async def stream_processing_loop(url: str):
+    """Use an FFmpeg subprocess to pipe raw BGR frames.
+
+    Advantages over cv2.VideoCapture(url):
+    - Handles HTTP MP4 progressive downloads correctly (loops when finished)
+    - Works for MJPEG HTTP streams, HLS, and most container formats
+    - Gives readable stderr so we can surface a clear error for blocked ports
+    """
     global _video_anomaly_detector
-    import cv2
+    import subprocess
+
+    W, H = 1280, 720
+    FRAME_BYTES = W * H * 3
 
     stream_status["error"] = None
     stream_status["active"] = True
@@ -303,35 +313,81 @@ async def stream_processing_loop(url: str):
         stream_status["active"] = False
         return
 
-    def open_capture():
-        cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        return cap
+    import tempfile, os as _os
+
+    # Write FFmpeg stderr to a temp file to avoid pipe deadlock
+    # (stderr fills the 64 KB pipe buffer → FFmpeg blocks → stdout stalls)
+    _stderr_path = tempfile.mktemp(suffix=".ffmpeg_err.txt")
+
+    def _build_cmd() -> list[str]:
+        cmd = ["ffmpeg", "-y", "-loglevel", "error"]
+        if url.lower().startswith("rtsp://"):
+            cmd += ["-rtsp_transport", "tcp"]
+        cmd += [
+            "-i", url,
+            "-f", "rawvideo",
+            "-pix_fmt", "bgr24",
+            "-vf", f"scale={W}:{H}",
+            "-",
+        ]
+        return cmd
+
+    def _start_proc():
+        stderr_fh = open(_stderr_path, "wb")
+        return subprocess.Popen(
+            _build_cmd(),
+            stdout=subprocess.PIPE,
+            stderr=stderr_fh,
+            bufsize=0,
+        )
+
+    def _read_stderr() -> str:
+        try:
+            with open(_stderr_path, "r", errors="replace") as fh:
+                return fh.read()
+        except Exception:
+            return ""
 
     loop = asyncio.get_event_loop()
-    cap = await loop.run_in_executor(None, open_capture)
-
-    if not cap.isOpened():
-        stream_status["error"] = f"Could not open stream: {url}"
-        stream_status["active"] = False
-        return
-
-    print(f"[stream] Opened stream: {url}")
-    consecutive_fails = 0
+    proc = None
 
     try:
+        proc = await loop.run_in_executor(None, _start_proc)
+        print(f"[stream] FFmpeg opened: {url}")
+        frames_read = 0
+
         while True:
-            ret, frame = await loop.run_in_executor(None, cap.read)
-            if not ret:
-                consecutive_fails += 1
-                if consecutive_fails > 30:
-                    stream_status["error"] = "Stream lost — too many consecutive read failures"
+            raw = await loop.run_in_executor(None, proc.stdout.read, FRAME_BYTES)  # type: ignore[union-attr]
+
+            if len(raw) < FRAME_BYTES:
+                # FFmpeg exited — read stderr from temp file for diagnostics
+                proc.kill()
+                proc.wait()
+                stderr_str = _read_stderr()
+
+                if frames_read == 0:
+                    # Never decoded a single frame — real connection error
+                    low = stderr_str.lower()
+                    if "403" in stderr_str or "forbidden" in low or "connection refused" in low:
+                        stream_status["error"] = (
+                            "Connection refused — RTSP port 554 is blocked in this "
+                            "environment. Use an HTTP/MJPEG stream URL instead."
+                        )
+                    else:
+                        last_line = stderr_str.strip().split("\n")[-1] if stderr_str.strip() else ""
+                        stream_status["error"] = last_line[:250] or f"Could not open stream: {url}"
                     break
-                await asyncio.sleep(0.05)
+
+                # Had frames — finite video (e.g. HTTP MP4) ended; loop it
+                print(f"[stream] Video ended after {frames_read} frames — looping")
+                tracker = Sort(max_age=5, min_hits=2, iou_threshold=0.3)
+                _video_anomaly_detector = AnomalyDetector()
+                frames_read = 0
+                proc = await loop.run_in_executor(None, _start_proc)
                 continue
 
-            consecutive_fails = 0
-            frame = cv2.resize(frame, (1280, 720))
+            frames_read += 1
+            frame = np.frombuffer(raw, dtype=np.uint8).reshape((H, W, 3)).copy()
             detections = await loop.run_in_executor(None, detector.detect, frame)
             raw_tracks = tracker.update(detections)
 
@@ -351,7 +407,13 @@ async def stream_processing_loop(url: str):
     except asyncio.CancelledError:
         pass
     finally:
-        cap.release()
+        if proc and proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        try:
+            _os.unlink(_stderr_path)
+        except Exception:
+            pass
         stream_status["active"] = False
         stream_status["url"] = None
         print("[stream] Stream processing stopped")

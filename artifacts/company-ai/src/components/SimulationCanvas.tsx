@@ -1,4 +1,4 @@
-import { useEffect, useRef, RefObject } from "react";
+import { useEffect, useRef, RefObject, memo } from "react";
 import { Track, Anomaly } from "../hooks/useSimulation";
 
 const W = 1280;
@@ -45,7 +45,7 @@ interface Props {
   frameJpeg?: string;
 }
 
-export default function SimulationCanvas({
+function SimulationCanvas({
   tracks, anomalies, cameraMode, videoRef, sourceMode = "idle", frameJpeg,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -271,3 +271,17 @@ export default function SimulationCanvas({
     />
   );
 }
+
+export default memo(SimulationCanvas, (prev, next) => {
+  if (prev.frameJpeg !== next.frameJpeg) return false;
+  if (prev.sourceMode !== next.sourceMode) return false;
+  if (prev.cameraMode !== next.cameraMode) return false;
+  if (prev.videoRef !== next.videoRef) return false;
+  if (prev.tracks.length !== next.tracks.length) return false;
+  if (prev.anomalies.length !== next.anomalies.length) return false;
+  for (let i = 0; i < prev.tracks.length; i++) {
+    const p = prev.tracks[i], n = next.tracks[i];
+    if (p.id !== n.id || p.x1 !== n.x1 || p.y1 !== n.y1 || p.running !== n.running) return false;
+  }
+  return true;
+});
