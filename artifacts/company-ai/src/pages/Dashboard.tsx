@@ -35,6 +35,13 @@ interface StreamStatusData {
   model_error: string | null;
 }
 
+interface WebcamStatusData {
+  active: boolean;
+  error: string | null;
+  model_ready: boolean;
+  model_error: string | null;
+}
+
 const PILL_STYLE = {
   background: "rgba(255,255,255,0.04)",
   border: "1px solid rgba(255,255,255,0.08)",
@@ -64,6 +71,9 @@ export default function Dashboard({ frame, connected }: Props) {
   const [streamStatus, setStreamStatus] = useState<StreamStatusData | null>(null);
   const [streamUrl, setStreamUrl] = useState("");
   const [streamError, setStreamError] = useState<string | null>(null);
+
+  // Webcam status from backend
+  const [webcamStatus, setWebcamStatus] = useState<WebcamStatusData | null>(null);
 
   // Refs
   const videoElRef = useRef<HTMLVideoElement | null>(null);
@@ -112,6 +122,24 @@ export default function Dashboard({ frame, connected }: Props) {
     const id = setInterval(poll, 2000);
     return () => clearInterval(id);
   }, []);
+
+  // Poll webcam status
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/webcam/status");
+        const data = await res.json();
+        setWebcamStatus(data);
+        // If backend says not active but we think we're in webcam mode, it means the loop crashed
+        if (!data.active && data.error && sourceMode === "webcam") {
+          setCameraError(`Backend error: ${data.error}`);
+        }
+      } catch {}
+    };
+    poll();
+    const id = setInterval(poll, 2000);
+    return () => clearInterval(id);
+  }, [sourceMode]);
 
   // ── Webcam ──────────────────────────────────────────────────────────────────
 
@@ -280,7 +308,14 @@ export default function Dashboard({ frame, connected }: Props) {
               opacity: (isVideoProcessing || isStreaming) ? 0.4 : 1,
             }}
           >
-            {sourceMode === "webcam" ? <><CameraOff size={14} /> Stop Webcam</> : <><Camera size={14} /> Live Webcam</>}
+            {sourceMode === "webcam" ? (
+              <>
+                {webcamStatus?.active
+                  ? <><div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981", animation: "pulse-ring 1.4s infinite" }} /> YOLO LIVE</>
+                  : <><Loader size={14} style={{ animation: "spin 1s linear infinite" }} /> YOLO Starting…</>
+                }
+              </>
+            ) : <><Camera size={14} /> Live Webcam</>}
           </button>
 
           {/* Video upload */}

@@ -72,6 +72,11 @@ stream_status = {
     "error": None,
 }
 
+webcam_status = {
+    "active": False,
+    "error": None,
+}
+
 # Shared queue for webcam frames arriving over WebSocket
 _cam_frame_queue: asyncio.Queue = asyncio.Queue(maxsize=4)
 
@@ -370,10 +375,15 @@ async def webcam_processing_loop():
     global _video_anomaly_detector
     import cv2
 
+    webcam_status["error"] = None
+    webcam_status["active"] = True
+
     try:
         from backend.detector import YOLOv8Detector
         from backend.sort_tracker import Sort
     except Exception as e:
+        webcam_status["error"] = f"Failed to load detector: {e}"
+        webcam_status["active"] = False
         print(f"[webcam] Failed to load detector: {e}")
         return
 
@@ -382,6 +392,8 @@ async def webcam_processing_loop():
         tracker = Sort(max_age=3, min_hits=2, iou_threshold=0.3)
         anomaly_detector = AnomalyDetector()
     except Exception as e:
+        webcam_status["error"] = f"Detector init failed: {e}"
+        webcam_status["active"] = False
         print(f"[webcam] Detector init failed: {e}")
         return
 
@@ -422,6 +434,7 @@ async def webcam_processing_loop():
     except asyncio.CancelledError:
         pass
     finally:
+        webcam_status["active"] = False
         print("[webcam] Webcam processing loop stopped")
 
 
@@ -601,6 +614,15 @@ def get_stream_status():
 
 # ─── Webcam mode endpoints ────────────────────────────────────────────────────
 
+@app.get("/api/webcam/status")
+def get_webcam_status():
+    return {
+        **webcam_status,
+        "model_ready": is_model_ready(),
+        "model_error": get_model_error(),
+    }
+
+
 @app.post("/api/webcam/start")
 async def start_webcam():
     global _processing_mode, _active_task
@@ -609,6 +631,8 @@ async def start_webcam():
 
     _cancel_active()
     _processing_mode = "webcam"
+    webcam_status["error"] = None
+    webcam_status["active"] = False  # will be set True when loop starts
     # Drain old frames
     while not _cam_frame_queue.empty():
         try:
@@ -624,6 +648,7 @@ async def stop_webcam():
     global _processing_mode
     _cancel_active()
     _processing_mode = "simulation"
+    webcam_status["active"] = False
     return {"success": True}
 
 
