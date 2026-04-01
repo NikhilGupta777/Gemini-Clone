@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import math
 import os
@@ -198,6 +199,14 @@ def _finalize_tracks(tracks: list, anomalies: list) -> list:
     return tracks
 
 
+def _encode_preview(frame) -> str:
+    """Encode a cv2 frame as a compact base64 JPEG for WebSocket transmission."""
+    import cv2
+    preview = cv2.resize(frame, (640, 360))
+    _, buf = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 55])
+    return base64.b64encode(buf.tobytes()).decode("ascii")
+
+
 # ─── Video processing loop ────────────────────────────────────────────────────
 
 async def video_processing_loop():
@@ -255,6 +264,7 @@ async def video_processing_loop():
             tracks = _finalize_tracks(tracks, anomalies)
 
             payload = build_frame_payload(tracks, anomalies, now, "video")
+            payload["frame_jpeg"] = _encode_preview(frame)
             if connected_clients:
                 await _broadcast(json.dumps(payload))
 
@@ -332,6 +342,7 @@ async def stream_processing_loop(url: str):
             tracks = _finalize_tracks(tracks, anomalies)
 
             payload = build_frame_payload(tracks, anomalies, now, "stream")
+            payload["frame_jpeg"] = _encode_preview(frame)
             if connected_clients:
                 await _broadcast(json.dumps(payload))
 
@@ -406,6 +417,7 @@ async def webcam_processing_loop():
             tracks = _finalize_tracks(tracks, anomalies)
 
             payload = build_frame_payload(tracks, anomalies, now, "webcam")
+            payload["frame_jpeg"] = _encode_preview(frame)
             if connected_clients:
                 await _broadcast(json.dumps(payload))
 

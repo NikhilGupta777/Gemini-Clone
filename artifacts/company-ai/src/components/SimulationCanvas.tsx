@@ -42,15 +42,31 @@ interface Props {
   cameraMode: "webcam" | "idle";
   videoRef: RefObject<HTMLVideoElement | null>;
   sourceMode?: SourceMode;
+  frameJpeg?: string;
 }
 
 export default function SimulationCanvas({
-  tracks, anomalies, cameraMode, videoRef, sourceMode = "idle",
+  tracks, anomalies, cameraMode, videoRef, sourceMode = "idle", frameJpeg,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
-  const dataRef = useRef({ tracks, anomalies, cameraMode, sourceMode });
 
+  // Keep a decoded Image element for the latest JPEG frame from backend
+  const backendImgRef = useRef<HTMLImageElement | null>(null);
+  const lastJpegRef = useRef<string | undefined>(undefined);
+
+  // When frameJpeg changes, update the Image element
+  useEffect(() => {
+    if (!frameJpeg || frameJpeg === lastJpegRef.current) return;
+    lastJpegRef.current = frameJpeg;
+    if (!backendImgRef.current) {
+      backendImgRef.current = new Image();
+    }
+    backendImgRef.current.src = `data:image/jpeg;base64,${frameJpeg}`;
+  }, [frameJpeg]);
+
+  // Keep latest data in a ref so the RAF loop can read it without stale closures
+  const dataRef = useRef({ tracks, anomalies, cameraMode, sourceMode });
   useEffect(() => {
     dataRef.current = { tracks, anomalies, cameraMode, sourceMode };
   }, [tracks, anomalies, cameraMode, sourceMode]);
@@ -72,14 +88,23 @@ export default function SimulationCanvas({
       // ── Background ─────────────────────────────────────────────────────────
 
       const vid = videoRef.current;
-      const hasLiveVideo = cameraMode === "webcam" && vid && vid.readyState >= 2;
+      const hasLiveWebcam = cameraMode === "webcam" && vid && vid.readyState >= 2;
+      const hasBackendFrame = backendImgRef.current?.complete && backendImgRef.current.naturalWidth > 0;
+      const isActiveMode = sourceMode === "video" || sourceMode === "stream" || sourceMode === "webcam";
 
-      if (hasLiveVideo) {
+      if (hasLiveWebcam) {
+        // Webcam: draw the local video element directly (zero latency)
         ctx.drawImage(vid, 0, 0, W, H);
-        ctx.fillStyle = "rgba(6,10,18,0.25)";
+        // Slight dark tint so overlays are readable
+        ctx.fillStyle = "rgba(0,0,0,0.15)";
         ctx.fillRect(0, 0, W, H);
-      } else if (sourceMode === "video" || sourceMode === "stream") {
-        // Server-processed source — dark bg with purple grid
+      } else if (isActiveMode && hasBackendFrame && backendImgRef.current) {
+        // Video / Stream / Webcam (YOLO path): draw server-sent JPEG frame
+        ctx.drawImage(backendImgRef.current, 0, 0, W, H);
+        ctx.fillStyle = "rgba(0,0,0,0.18)";
+        ctx.fillRect(0, 0, W, H);
+      } else if (isActiveMode) {
+        // Active but no frame yet — dark grid while waiting
         const bg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 700);
         bg.addColorStop(0, "#0a0f1f");
         bg.addColorStop(1, "#05080f");
@@ -89,20 +114,23 @@ export default function SimulationCanvas({
         ctx.lineWidth = 1;
         for (let x = 80; x < W; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
         for (let y = 80; y < H; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+        // Waiting label
+        ctx.font = "600 12px monospace";
+        ctx.fillStyle = "#334155";
+        const wt = "Loading detection engine…";
+        ctx.fillText(wt, W / 2 - ctx.measureText(wt).width / 2, H / 2);
       } else {
-        // Idle — dark bg with subtle grid and "waiting" message
+        // Idle — standby background
         const bg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 700);
         bg.addColorStop(0, "#080e1c");
         bg.addColorStop(1, "#040810");
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, W, H);
-
         ctx.strokeStyle = "rgba(59,130,246,0.04)";
         ctx.lineWidth = 1;
         for (let x = 80; x < W; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
         for (let y = 80; y < H; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
 
-        // Centre idle message
         const pulse = 0.55 + 0.45 * Math.sin(t / 1200);
         ctx.globalAlpha = pulse;
         ctx.font = "700 13px monospace";
@@ -117,7 +145,7 @@ export default function SimulationCanvas({
       }
       ctx.setLineDash([]);
 
-      // ── Tracks ─────────────────────────────────────────────────────────────
+      // ── Detection tracks ────────────────────────────────────────────────────
 
       for (const track of tracks) {
         const { x1, y1, x2, y2, class_id, class_name, running, id, confidence } = track;
@@ -135,7 +163,7 @@ export default function SimulationCanvas({
         ctx.shadowBlur = 0;
 
         const confStr = confidence !== undefined ? ` ${(confidence * 100).toFixed(0)}%` : "";
-        const labelText = `#${id} ${class_name}${confStr}${running ? " RUNNING" : ""}`;
+        const labelText = `#${id} ${class_name}${confStr}${running ? " ⚡" : ""}`;
         ctx.font = "600 10px monospace";
         const tw = ctx.measureText(labelText).width;
         const lx = Math.min(x1, W - tw - 14);
@@ -156,7 +184,7 @@ export default function SimulationCanvas({
         }
       }
 
-      // ── Anomaly overlays ────────────────────────────────────────────────────
+      // ── Anomaly zone overlays ───────────────────────────────────────────────
 
       for (const anomaly of anomalies) {
         if (!anomaly.position) continue;
@@ -210,8 +238,8 @@ export default function SimulationCanvas({
         return "#1e3a5f";
       })();
 
-      ctx.fillStyle = "rgba(0,0,0,0.6)";
-      roundRect(ctx, 12, H - 36, 220, 26, 6);
+      ctx.fillStyle = "rgba(0,0,0,0.65)";
+      roundRect(ctx, 12, H - 36, 230, 26, 6);
       ctx.fill();
       ctx.fillStyle = modeColor;
       ctx.font = "11px monospace";
@@ -220,7 +248,7 @@ export default function SimulationCanvas({
       const isReal = sourceMode !== "idle";
       const badgeText = isReal ? "⚡ LIVE DETECT" : "◉ STANDBY";
       const badgeW = 126;
-      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillStyle = "rgba(0,0,0,0.65)";
       roundRect(ctx, W - badgeW - 12, H - 36, badgeW, 26, 6);
       ctx.fill();
       ctx.fillStyle = modeColor;

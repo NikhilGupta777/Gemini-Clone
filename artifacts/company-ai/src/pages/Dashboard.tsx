@@ -604,6 +604,7 @@ export default function Dashboard() {
               cameraMode={sourceMode === "webcam" ? "webcam" : "idle"}
               videoRef={videoElRef}
               sourceMode={displayMode}
+              frameJpeg={frame?.frame_jpeg}
             />
           </div>
 

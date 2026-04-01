@@ -36,6 +36,7 @@ export interface FrameData {
   stats: SimStats;
   timestamp: number;
   mode?: "idle" | "video" | "webcam" | "stream";
+  frame_jpeg?: string;
 }
 
 function getWsUrl() {
