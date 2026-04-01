@@ -334,12 +334,24 @@ async def stream_processing_loop(url: str):
 
     def _start_proc():
         stderr_fh = open(_stderr_path, "wb")
+        # bufsize=-1 (default) wraps stdout in BufferedReader so that
+        # read(n) returns EXACTLY n bytes — raw FileIO only returns
+        # whatever is available in a single syscall, causing premature EOF.
         return subprocess.Popen(
             _build_cmd(),
             stdout=subprocess.PIPE,
             stderr=stderr_fh,
-            bufsize=0,
         )
+
+    def _read_exactly(pipe, n: int) -> bytes:
+        """Read exactly n bytes from pipe, or fewer if the pipe closes."""
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = pipe.read(n - len(buf))
+            if not chunk:
+                break
+            buf.extend(chunk)
+        return bytes(buf)
 
     def _read_stderr() -> str:
         try:
@@ -357,7 +369,7 @@ async def stream_processing_loop(url: str):
         frames_read = 0
 
         while True:
-            raw = await loop.run_in_executor(None, proc.stdout.read, FRAME_BYTES)  # type: ignore[union-attr]
+            raw = await loop.run_in_executor(None, _read_exactly, proc.stdout, FRAME_BYTES)
 
             if len(raw) < FRAME_BYTES:
                 # FFmpeg exited — read stderr from temp file for diagnostics
