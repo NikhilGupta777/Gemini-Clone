@@ -1,21 +1,20 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { FrameData } from "../hooks/useSimulation";
 import { useAlertSound } from "../hooks/useAlertSound";
+import { useCamProcessor } from "../hooks/useCamProcessor";
 import SimulationCanvas from "../components/SimulationCanvas";
 import StatsCards from "../components/StatsCards";
 import AlertsFeed from "../components/AlertsFeed";
 import {
   Camera, CameraOff, Monitor, Cpu, Users, Package,
   AlertTriangle, Activity, Upload, Video, StopCircle,
-  CheckCircle, Loader, Volume2, VolumeX,
+  CheckCircle, Loader, Volume2, VolumeX, Radio, Link, X,
 } from "lucide-react";
 
 interface Props {
   frame: FrameData | null;
   connected: boolean;
 }
-
-type CameraMode = "simulation" | "webcam";
 
 interface VideoStatusData {
   mode: string;
@@ -26,6 +25,14 @@ interface VideoStatusData {
   model_ready: boolean;
   model_error: string | null;
   error: string | null;
+}
+
+interface StreamStatusData {
+  active: boolean;
+  url: string | null;
+  error: string | null;
+  model_ready: boolean;
+  model_error: string | null;
 }
 
 const PILL_STYLE = {
@@ -39,26 +46,43 @@ const PILL_STYLE = {
   flex: 1,
 };
 
+type ActivePanel = "none" | "video" | "stream";
+
 export default function Dashboard({ frame, connected }: Props) {
-  const [cameraMode, setCameraMode] = useState<CameraMode>("simulation");
+  const [sourceMode, setSourceMode] = useState<"simulation" | "webcam" | "video" | "stream">("simulation");
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [showVideoPanel, setShowVideoPanel] = useState(false);
+  const [activePanel, setActivePanel] = useState<ActivePanel>("none");
+
+  // Video upload state
   const [videoStatus, setVideoStatus] = useState<VideoStatusData | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  // Stream state
+  const [streamStatus, setStreamStatus] = useState<StreamStatusData | null>(null);
+  const [streamUrl, setStreamUrl] = useState("");
+  const [streamError, setStreamError] = useState<string | null>(null);
+
+  // Refs
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tracks = frame?.tracks ?? [];
   const anomalies = frame?.anomalies ?? [];
   const stats = frame?.stats ?? null;
-  const sourceMode = frame?.mode ?? "simulation";
+  // Use server-reported mode when available (for video/stream), else use local state
+  const displayMode = frame?.mode ?? sourceMode;
 
   useAlertSound(anomalies, soundEnabled);
+
+  // Hook: send webcam frames to backend for REAL YOLO processing
+  useCamProcessor(
+    sourceMode === "webcam" ? videoElRef.current : null,
+    sourceMode === "webcam",
+  );
 
   // Poll video status
   useEffect(() => {
@@ -70,38 +94,70 @@ export default function Dashboard({ frame, connected }: Props) {
       } catch {}
     };
     poll();
-    const interval = setInterval(poll, 1500);
-    return () => clearInterval(interval);
+    const id = setInterval(poll, 1500);
+    return () => clearInterval(id);
   }, []);
+
+  // Poll stream status
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/stream/status");
+        const data = await res.json();
+        setStreamStatus(data);
+        if (data.active) setSourceMode("stream");
+      } catch {}
+    };
+    poll();
+    const id = setInterval(poll, 2000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ── Webcam ──────────────────────────────────────────────────────────────────
 
   const enableCamera = useCallback(async () => {
     setCameraError(null);
     try {
-      streamRef.current?.getTracks().forEach(t => t.stop());
+      mediaStreamRef.current?.getTracks().forEach(t => t.stop());
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
       });
-      streamRef.current = stream;
-      if (!videoRef.current) {
-        videoRef.current = document.createElement("video");
-        videoRef.current.muted = true;
-        videoRef.current.playsInline = true;
+      mediaStreamRef.current = stream;
+
+      if (!videoElRef.current) {
+        const vid = document.createElement("video");
+        vid.muted = true;
+        vid.playsInline = true;
+        videoElRef.current = vid;
       }
-      videoRef.current.srcObject = stream;
-      await videoRef.current.play();
-      setCameraMode("webcam");
-    } catch (err: any) {
-      setCameraError(err.message ?? "Camera access denied");
+      videoElRef.current.srcObject = stream;
+      await videoElRef.current.play();
+
+      // Tell backend to start webcam mode (spins up YOLO processor)
+      const res = await fetch("/api/webcam/start", { method: "POST" });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.detail ?? "Could not start webcam processing");
+      }
+
+      setSourceMode("webcam");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Camera access denied";
+      setCameraError(msg);
     }
   }, []);
 
-  const disableCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setCameraMode("simulation");
+  const disableCamera = useCallback(async () => {
+    mediaStreamRef.current?.getTracks().forEach(t => t.stop());
+    mediaStreamRef.current = null;
+    if (videoElRef.current) videoElRef.current.srcObject = null;
+    await fetch("/api/webcam/stop", { method: "POST" }).catch(() => {});
+    setSourceMode("simulation");
     setCameraError(null);
   }, []);
+
+  // ── Video upload ─────────────────────────────────────────────────────────────
 
   const handleFileUpload = async (file: File) => {
     setUploading(true);
@@ -112,27 +168,57 @@ export default function Dashboard({ frame, connected }: Props) {
       const res = await fetch("/api/video/upload", { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? "Upload failed");
-    } catch (e: any) {
-      setUploadError(e.message);
+    } catch (e: unknown) {
+      setUploadError(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploading(false);
     }
   };
 
-  const startProcessing = async () => {
+  const startVideoProcessing = async () => {
     const res = await fetch("/api/video/start", { method: "POST" });
     if (!res.ok) {
       const d = await res.json();
       setUploadError(d.detail);
+    } else {
+      setSourceMode("video");
     }
   };
 
-  const stopProcessing = async () => {
+  const stopVideoProcessing = async () => {
     await fetch("/api/video/stop", { method: "POST" });
+    setSourceMode("simulation");
   };
 
-  const isProcessing = videoStatus?.mode === "processing";
-  const hasUpload = videoStatus?.filename && videoStatus?.mode !== "simulation";
+  // ── Stream ────────────────────────────────────────────────────────────────────
+
+  const startStream = async () => {
+    setStreamError(null);
+    if (!streamUrl.trim()) { setStreamError("Enter a stream URL first"); return; }
+    try {
+      const res = await fetch("/api/stream/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: streamUrl.trim() }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail ?? "Could not start stream");
+      setSourceMode("stream");
+    } catch (e: unknown) {
+      setStreamError(e instanceof Error ? e.message : "Stream error");
+    }
+  };
+
+  const stopStream = async () => {
+    await fetch("/api/stream/stop", { method: "POST" });
+    setSourceMode("simulation");
+  };
+
+  const isVideoProcessing = videoStatus?.mode === "processing";
+  const hasUpload = !!(videoStatus?.filename && videoStatus?.mode !== "simulation");
+  const isStreaming = streamStatus?.active || sourceMode === "stream";
+  const modelReady = videoStatus?.model_ready ?? false;
+  const modelError = videoStatus?.model_error ?? null;
 
   const metricPills = [
     { icon: Users, label: "PERSONS", value: stats?.person_count ?? 0, color: "#3b82f6" },
@@ -141,204 +227,289 @@ export default function Dashboard({ frame, connected }: Props) {
     { icon: Activity, label: "ACTIVE TRACKS", value: tracks.length, color: "#a855f7" },
   ];
 
+  // mode badge displayed in header
+  const modeBadge = (() => {
+    if (displayMode === "video") return { label: "VIDEO DETECT · YOLO", color: "#a855f7", icon: Video };
+    if (displayMode === "webcam") return { label: "WEBCAM · LIVE YOLO", color: "#10b981", icon: Camera };
+    if (displayMode === "stream") return { label: "STREAM · LIVE YOLO", color: "#f59e0b", icon: Radio };
+    return { label: "SIMULATION MODE", color: "#475569", icon: Monitor };
+  })();
+
   return (
     <div>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f1f5f9", letterSpacing: -0.5, marginBottom: 4 }}>
             Live Surveillance Dashboard
           </h1>
           <p style={{ color: "#475569", fontSize: 13 }}>
-            {sourceMode === "video"
-              ? "Real detection · YOLOv8n + SORT Tracking · VIDEO MODE"
-              : "Simulation mode · Anomaly detection engine running"}
+            {displayMode === "video" && "YOLOv8n + SORT — processing uploaded video"}
+            {displayMode === "webcam" && "YOLOv8n + SORT — real-time webcam detection"}
+            {displayMode === "stream" && `YOLOv8n + SORT — live stream: ${streamStatus?.url ?? ""}`}
+            {displayMode === "simulation" && "Simulation mode · Switch to webcam, video or stream for real detection"}
           </p>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* Sound toggle */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {/* Sound */}
           <button
             onClick={() => setSoundEnabled(v => !v)}
-            title={soundEnabled ? "Mute alerts" : "Unmute alerts"}
             style={{
-              display: "flex", alignItems: "center", gap: 6,
-              padding: "8px 14px", borderRadius: 8,
-              border: "1px solid rgba(255,255,255,0.1)",
-              background: "rgba(255,255,255,0.04)",
-              color: soundEnabled ? "#10b981" : "#475569",
-              cursor: "pointer", fontSize: 12, fontWeight: 600,
+              display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
+              color: soundEnabled ? "#10b981" : "#475569", cursor: "pointer", fontSize: 12, fontWeight: 600,
             }}
           >
             {soundEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
             {soundEnabled ? "Sound ON" : "Sound OFF"}
           </button>
 
-          {/* Webcam toggle */}
+          {/* Webcam */}
           {cameraError && <span style={{ fontSize: 11, color: "#ef4444", maxWidth: 160 }}>{cameraError}</span>}
           <button
-            onClick={cameraMode === "simulation" ? enableCamera : disableCamera}
+            onClick={sourceMode === "webcam" ? disableCamera : enableCamera}
+            disabled={isVideoProcessing || isStreaming}
             style={{
               display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 8,
-              border: "1px solid", cursor: "pointer", fontSize: 12, fontWeight: 600, transition: "all 0.2s",
-              borderColor: cameraMode === "webcam" ? "#10b981" : "rgba(255,255,255,0.12)",
-              background: cameraMode === "webcam" ? "rgba(16,185,129,0.12)" : "rgba(255,255,255,0.04)",
-              color: cameraMode === "webcam" ? "#10b981" : "#94a3b8",
+              border: "1px solid", cursor: (isVideoProcessing || isStreaming) ? "not-allowed" : "pointer",
+              fontSize: 12, fontWeight: 600, transition: "all 0.2s",
+              borderColor: sourceMode === "webcam" ? "#10b981" : "rgba(255,255,255,0.12)",
+              background: sourceMode === "webcam" ? "rgba(16,185,129,0.12)" : "rgba(255,255,255,0.04)",
+              color: sourceMode === "webcam" ? "#10b981" : "#94a3b8",
+              opacity: (isVideoProcessing || isStreaming) ? 0.4 : 1,
             }}
           >
-            {cameraMode === "webcam" ? <><CameraOff size={14} /> Disable Camera</> : <><Camera size={14} /> Enable Camera</>}
+            {sourceMode === "webcam" ? <><CameraOff size={14} /> Stop Webcam</> : <><Camera size={14} /> Live Webcam</>}
           </button>
 
-          {/* Video upload toggle */}
+          {/* Video upload */}
           <button
-            onClick={() => setShowVideoPanel(v => !v)}
+            onClick={() => setActivePanel(p => p === "video" ? "none" : "video")}
             style={{
               display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 8,
-              border: "1px solid",
-              borderColor: showVideoPanel || isProcessing ? "#a855f7" : "rgba(255,255,255,0.12)",
-              background: showVideoPanel || isProcessing ? "rgba(168,85,247,0.12)" : "rgba(255,255,255,0.04)",
-              color: showVideoPanel || isProcessing ? "#a855f7" : "#94a3b8",
-              cursor: "pointer", fontSize: 12, fontWeight: 600,
+              border: "1px solid", cursor: "pointer", fontSize: 12, fontWeight: 600,
+              borderColor: activePanel === "video" || isVideoProcessing ? "#a855f7" : "rgba(255,255,255,0.12)",
+              background: activePanel === "video" || isVideoProcessing ? "rgba(168,85,247,0.12)" : "rgba(255,255,255,0.04)",
+              color: activePanel === "video" || isVideoProcessing ? "#a855f7" : "#94a3b8",
             }}
           >
             <Video size={14} />
-            {isProcessing ? "Video Running" : "Upload Video"}
+            {isVideoProcessing ? "Video Running" : "Upload Video"}
           </button>
 
+          {/* Stream */}
+          <button
+            onClick={() => setActivePanel(p => p === "stream" ? "none" : "stream")}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 8,
+              border: "1px solid", cursor: "pointer", fontSize: 12, fontWeight: 600,
+              borderColor: activePanel === "stream" || isStreaming ? "#f59e0b" : "rgba(255,255,255,0.12)",
+              background: activePanel === "stream" || isStreaming ? "rgba(245,158,11,0.1)" : "rgba(255,255,255,0.04)",
+              color: activePanel === "stream" || isStreaming ? "#f59e0b" : "#94a3b8",
+            }}
+          >
+            <Radio size={14} />
+            {isStreaming ? "Stream Active" : "Live Stream"}
+          </button>
+
+          {/* Mode badge */}
           <div style={{
-            padding: "8px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)",
-            background: "rgba(255,255,255,0.03)", display: "flex", alignItems: "center",
-            gap: 6, fontSize: 11, color: "#64748b", fontWeight: 600,
+            padding: "8px 14px", borderRadius: 8, border: `1px solid ${modeBadge.color}33`,
+            background: `${modeBadge.color}10`, display: "flex", alignItems: "center",
+            gap: 6, fontSize: 11, color: modeBadge.color, fontWeight: 700,
           }}>
-            {sourceMode === "video" ? <Video size={13} color="#a855f7" /> : cameraMode === "webcam" ? <Camera size={13} color="#10b981" /> : <Monitor size={13} />}
-            {sourceMode === "video" ? "VIDEO DETECT" : cameraMode === "webcam" ? "WEBCAM ACTIVE" : "SIMULATION MODE"}
+            <modeBadge.icon size={13} />
+            {modeBadge.label}
           </div>
         </div>
       </div>
 
-      {/* Video Upload Panel */}
-      {showVideoPanel && (
+      {/* ── Video Upload Panel ── */}
+      {activePanel === "video" && (
         <div style={{
           background: "rgba(168,85,247,0.05)", border: "1px solid rgba(168,85,247,0.2)",
           borderRadius: 14, padding: 20, marginBottom: 20,
         }}>
-          <div style={{ fontSize: 9, color: "#a855f7", letterSpacing: 2, fontWeight: 700, marginBottom: 14 }}>
-            YOLOv8n REAL DETECTION · ULTRALYTICS + SORT TRACKING
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ fontSize: 9, color: "#a855f7", letterSpacing: 2, fontWeight: 700 }}>
+              YOLOv8n REAL DETECTION · UPLOAD VIDEO FILE
+            </div>
+            <button onClick={() => setActivePanel("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#475569" }}>
+              <X size={16} />
+            </button>
           </div>
 
           {/* Model status */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 11 }}>
-            {videoStatus?.model_ready ? (
-              <><CheckCircle size={13} color="#10b981" /><span style={{ color: "#10b981" }}>YOLOv8n model ready</span></>
-            ) : videoStatus?.model_error ? (
-              <><span style={{ color: "#ef4444" }}>Model error: {videoStatus.model_error}</span></>
+            {modelReady ? (
+              <><CheckCircle size={13} color="#10b981" /><span style={{ color: "#10b981" }}>YOLOv8n ready</span></>
+            ) : modelError ? (
+              <><X size={13} color="#ef4444" /><span style={{ color: "#ef4444" }}>Model error: {modelError}</span></>
             ) : (
               <><Loader size={13} color="#f59e0b" style={{ animation: "spin 1s linear infinite" }} />
-              <span style={{ color: "#f59e0b" }}>Loading YOLOv8n model (~6 MB)…</span></>
+              <span style={{ color: "#f59e0b" }}>Loading YOLOv8n (~6 MB, one-time download)…</span></>
             )}
           </div>
 
-          {/* Drop zone */}
-          {!isProcessing && (
+          {!isVideoProcessing && (
             <div
               onDragOver={e => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
-              onDrop={e => {
-                e.preventDefault(); setDragOver(false);
-                const file = e.dataTransfer.files[0];
-                if (file) handleFileUpload(file);
-              }}
+              onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFileUpload(f); }}
               onClick={() => fileInputRef.current?.click()}
               style={{
                 border: `2px dashed ${dragOver ? "#a855f7" : "rgba(168,85,247,0.3)"}`,
                 borderRadius: 10, padding: "24px 20px", textAlign: "center",
                 cursor: "pointer", transition: "border-color 0.2s",
-                background: dragOver ? "rgba(168,85,247,0.08)" : "transparent",
-                marginBottom: 12,
+                background: dragOver ? "rgba(168,85,247,0.08)" : "transparent", marginBottom: 12,
               }}
             >
               <Upload size={24} color="#a855f7" style={{ margin: "0 auto 8px" }} />
               <div style={{ color: "#94a3b8", fontSize: 13 }}>
-                {uploading ? "Uploading…" : videoStatus?.filename && hasUpload
-                  ? <><span style={{ color: "#a855f7", fontWeight: 600 }}>{videoStatus.filename}</span> · ready</>
+                {uploading ? "Uploading…" : (videoStatus?.filename && hasUpload)
+                  ? <><span style={{ color: "#a855f7", fontWeight: 600 }}>{videoStatus.filename}</span> · ready to process</>
                   : "Drop video here or click to browse"}
               </div>
-              <div style={{ fontSize: 11, color: "#334155", marginTop: 4 }}>
-                MP4, AVI, MOV, MKV — max 200 MB
-              </div>
+              <div style={{ fontSize: 11, color: "#334155", marginTop: 4 }}>MP4, AVI, MOV, MKV · max 500 MB</div>
             </div>
           )}
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="video/*"
-            style={{ display: "none" }}
-            onChange={e => {
-              const file = e.target.files?.[0];
-              if (file) handleFileUpload(file);
-              e.target.value = "";
-            }}
+          <input ref={fileInputRef} type="file" accept="video/*" style={{ display: "none" }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ""; }}
           />
 
           {uploadError && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 10 }}>{uploadError}</div>}
 
-          {/* Progress bar */}
-          {isProcessing && (
+          {isVideoProcessing && (
             <div style={{ marginBottom: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#64748b", marginBottom: 6 }}>
-                <span>Processing: {videoStatus?.filename}</span>
-                <span>{videoStatus?.progress}% · frame {videoStatus?.current_frame}/{videoStatus?.total_frames}</span>
+                <span>{videoStatus?.filename}</span>
+                <span>{videoStatus?.progress?.toFixed(1)}% · frame {videoStatus?.current_frame}/{videoStatus?.total_frames}</span>
               </div>
               <div style={{ height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 3 }}>
                 <div style={{
-                  height: "100%", borderRadius: 3,
-                  width: `${videoStatus?.progress ?? 0}%`,
-                  background: "linear-gradient(90deg, #7c3aed, #a855f7)",
-                  transition: "width 0.5s",
+                  height: "100%", borderRadius: 3, width: `${videoStatus?.progress ?? 0}%`,
+                  background: "linear-gradient(90deg,#7c3aed,#a855f7)", transition: "width 0.5s",
                 }} />
               </div>
             </div>
           )}
 
-          {videoStatus?.error && (
-            <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 10 }}>Error: {videoStatus.error}</div>
-          )}
+          {videoStatus?.error && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 10 }}>Error: {videoStatus.error}</div>}
 
-          {/* Start / Stop buttons */}
           <div style={{ display: "flex", gap: 10 }}>
-            {!isProcessing && hasUpload && (
-              <button
-                onClick={startProcessing}
-                disabled={!videoStatus?.model_ready}
-                style={{
-                  display: "flex", alignItems: "center", gap: 8, padding: "8px 18px",
-                  borderRadius: 8, border: "none", cursor: videoStatus?.model_ready ? "pointer" : "not-allowed",
-                  background: videoStatus?.model_ready ? "linear-gradient(135deg,#7c3aed,#a855f7)" : "#1e1b4b",
-                  color: "#fff", fontWeight: 700, fontSize: 13,
-                }}
-              >
+            {!isVideoProcessing && hasUpload && (
+              <button onClick={startVideoProcessing} disabled={!modelReady} style={{
+                display: "flex", alignItems: "center", gap: 8, padding: "8px 18px", borderRadius: 8,
+                border: "none", cursor: modelReady ? "pointer" : "not-allowed",
+                background: modelReady ? "linear-gradient(135deg,#7c3aed,#a855f7)" : "#1e1b4b",
+                color: "#fff", fontWeight: 700, fontSize: 13,
+              }}>
                 <Video size={14} /> Start Real Detection
               </button>
             )}
-            {isProcessing && (
-              <button
-                onClick={stopProcessing}
-                style={{
-                  display: "flex", alignItems: "center", gap: 8, padding: "8px 18px",
-                  borderRadius: 8, border: "none", cursor: "pointer",
-                  background: "rgba(239,68,68,0.15)", color: "#ef4444",
-                  fontWeight: 700, fontSize: 13, outline: "1px solid rgba(239,68,68,0.3)",
-                }}
-              >
-                <StopCircle size={14} /> Stop & Return to Simulation
+            {isVideoProcessing && (
+              <button onClick={stopVideoProcessing} style={{
+                display: "flex", alignItems: "center", gap: 8, padding: "8px 18px", borderRadius: 8,
+                border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)",
+                color: "#ef4444", fontWeight: 700, fontSize: 13, outline: "1px solid rgba(239,68,68,0.3)",
+              }}>
+                <StopCircle size={14} /> Stop Processing
               </button>
             )}
           </div>
         </div>
       )}
 
-      {/* Main grid */}
+      {/* ── Stream Panel ── */}
+      {activePanel === "stream" && (
+        <div style={{
+          background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.2)",
+          borderRadius: 14, padding: 20, marginBottom: 20,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ fontSize: 9, color: "#f59e0b", letterSpacing: 2, fontWeight: 700 }}>
+              LIVE STREAM DETECTION · RTSP / HTTP / IP CAMERA
+            </div>
+            <button onClick={() => setActivePanel("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#475569" }}>
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* Model status */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 11 }}>
+            {streamStatus?.model_ready ? (
+              <><CheckCircle size={13} color="#10b981" /><span style={{ color: "#10b981" }}>YOLOv8n ready</span></>
+            ) : streamStatus?.model_error ? (
+              <><X size={13} color="#ef4444" /><span style={{ color: "#ef4444" }}>Model error: {streamStatus.model_error}</span></>
+            ) : (
+              <><Loader size={13} color="#f59e0b" style={{ animation: "spin 1s linear infinite" }} />
+              <span style={{ color: "#f59e0b" }}>Loading YOLOv8n…</span></>
+            )}
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>
+              Enter any video stream URL — RTSP, HTTP, or an IP camera. Examples:
+            </div>
+            <div style={{ fontSize: 10, color: "#334155", marginBottom: 10, lineHeight: 1.8 }}>
+              <code style={{ color: "#f59e0b" }}>rtsp://192.168.1.100:554/stream</code> — IP camera (RTSP)<br />
+              <code style={{ color: "#f59e0b" }}>http://IP:PORT/video</code> — HTTP MJPEG camera<br />
+              <code style={{ color: "#f59e0b" }}>rtsp://user:pass@IP:554/stream</code> — with authentication
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ position: "relative", flex: 1 }}>
+                <Link size={13} color="#64748b" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+                <input
+                  type="text"
+                  value={streamUrl}
+                  onChange={e => setStreamUrl(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && !isStreaming && startStream()}
+                  placeholder="rtsp:// or http:// stream URL"
+                  disabled={isStreaming}
+                  style={{
+                    width: "100%", padding: "9px 12px 9px 32px", borderRadius: 8, boxSizing: "border-box",
+                    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)",
+                    color: "#f1f5f9", fontSize: 12, outline: "none",
+                  }}
+                />
+              </div>
+              {!isStreaming ? (
+                <button onClick={startStream} disabled={!streamStatus?.model_ready} style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "9px 18px", borderRadius: 8,
+                  border: "none", cursor: streamStatus?.model_ready ? "pointer" : "not-allowed",
+                  background: streamStatus?.model_ready ? "linear-gradient(135deg,#d97706,#f59e0b)" : "#1c1a10",
+                  color: "#fff", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap",
+                }}>
+                  <Radio size={14} /> Connect
+                </button>
+              ) : (
+                <button onClick={stopStream} style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "9px 18px", borderRadius: 8,
+                  border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)",
+                  color: "#ef4444", fontWeight: 700, fontSize: 13, outline: "1px solid rgba(239,68,68,0.3)",
+                  whiteSpace: "nowrap",
+                }}>
+                  <StopCircle size={14} /> Disconnect
+                </button>
+              )}
+            </div>
+          </div>
+
+          {streamError && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 8 }}>{streamError}</div>}
+          {streamStatus?.error && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 8 }}>Stream error: {streamStatus.error}</div>}
+
+          {isStreaming && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 11 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", boxShadow: "0 0 8px #f59e0b", animation: "pulse-ring 1.4s infinite" }} />
+              <span style={{ color: "#f59e0b" }}>Stream active — processing with YOLOv8n</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Main grid ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 310px", gap: 20, alignItems: "start" }}>
         <div>
           <div style={{
@@ -367,9 +538,9 @@ export default function Dashboard({ frame, connected }: Props) {
             <SimulationCanvas
               tracks={tracks}
               anomalies={anomalies}
-              cameraMode={cameraMode}
-              videoRef={videoRef}
-              sourceMode={sourceMode}
+              cameraMode={sourceMode === "webcam" ? "webcam" : "simulation"}
+              videoRef={videoElRef}
+              sourceMode={displayMode}
             />
           </div>
 
@@ -402,6 +573,11 @@ export default function Dashboard({ frame, connected }: Props) {
           40% { transform: scale(1.2); opacity: 1; }
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse-ring {
+          0% { box-shadow: 0 0 0 0 rgba(245,158,11,0.7); }
+          70% { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
+          100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); }
+        }
       `}</style>
     </div>
   );

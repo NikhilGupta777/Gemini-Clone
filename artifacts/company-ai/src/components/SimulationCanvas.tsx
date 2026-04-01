@@ -13,7 +13,7 @@ function getAnomalyIds(anomalies: Anomaly[]): Set<number> {
 function drawCornerMarker(
   ctx: CanvasRenderingContext2D,
   x1: number, y1: number, x2: number, y2: number,
-  color: string, size = 14
+  color: string, size = 14,
 ) {
   ctx.strokeStyle = color;
   ctx.lineWidth = 2.5;
@@ -34,15 +34,19 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
+type SourceMode = "simulation" | "video" | "webcam" | "stream";
+
 interface Props {
   tracks: Track[];
   anomalies: Anomaly[];
   cameraMode: "simulation" | "webcam";
   videoRef: React.RefObject<HTMLVideoElement | null>;
-  sourceMode?: "simulation" | "video";
+  sourceMode?: SourceMode;
 }
 
-export default function SimulationCanvas({ tracks, anomalies, cameraMode, videoRef, sourceMode = "simulation" }: Props) {
+export default function SimulationCanvas({
+  tracks, anomalies, cameraMode, videoRef, sourceMode = "simulation",
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
   const dataRef = useRef({ tracks, anomalies, cameraMode, sourceMode });
@@ -61,219 +65,189 @@ export default function SimulationCanvas({ tracks, anomalies, cameraMode, videoR
       if (!ctx || !canvas) return;
       const { tracks, anomalies, cameraMode, sourceMode } = dataRef.current;
       const t = Date.now();
+      const anomalyIds = getAnomalyIds(anomalies);
 
       ctx.clearRect(0, 0, W, H);
 
-      // ── Background ──────────────────────────────────────────
-      const vid = videoRef.current;
-      const hasVideo = cameraMode === "webcam" && vid && vid.readyState >= 2;
+      // ── Background ─────────────────────────────────────────────────────────
 
-      if (hasVideo) {
+      const vid = videoRef.current;
+      const hasLiveVideo = cameraMode === "webcam" && vid && vid.readyState >= 2;
+
+      if (hasLiveVideo) {
+        // Real webcam: draw actual camera frame + slight dark overlay
         ctx.drawImage(vid, 0, 0, W, H);
-        ctx.fillStyle = "rgba(6,10,18,0.35)";
+        ctx.fillStyle = "rgba(6,10,18,0.25)";
         ctx.fillRect(0, 0, W, H);
+      } else if (sourceMode === "video" || sourceMode === "stream") {
+        // Server processes video/stream: show dark bg + purple grid (server sends tracks)
+        const bg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 700);
+        bg.addColorStop(0, "#0a0f1f");
+        bg.addColorStop(1, "#05080f");
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = "rgba(168,85,247,0.06)";
+        ctx.lineWidth = 1;
+        for (let x = 80; x < W; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+        for (let y = 80; y < H; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
       } else {
+        // Simulation: dark bg with labelled zone overlays
         const bg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 700);
         bg.addColorStop(0, "#0d1525");
         bg.addColorStop(1, "#080c18");
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, W, H);
-
-        // Grid
         ctx.strokeStyle = "rgba(59,130,246,0.07)";
         ctx.lineWidth = 1;
         for (let x = 80; x < W; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
         for (let y = 80; y < H; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
 
-        // Zone overlays
         const zones = [
-          { label: "ZONE A · ENTRANCE", x: 0,         w: W / 3, color: "rgba(59,130,246,0.07)",  borderColor: "rgba(59,130,246,0.15)" },
-          { label: "ZONE B · CORRIDOR", x: W / 3,     w: W / 3, color: "rgba(16,185,129,0.05)",  borderColor: "rgba(16,185,129,0.12)" },
-          { label: "ZONE C · EXIT",     x: 2 * W / 3, w: W / 3, color: "rgba(168,85,247,0.06)",  borderColor: "rgba(168,85,247,0.12)" },
+          { label: "ZONE A · ENTRANCE", x: 0, w: W / 3, color: "rgba(59,130,246,0.07)", borderColor: "rgba(59,130,246,0.15)" },
+          { label: "ZONE B · CORRIDOR", x: W / 3, w: W / 3, color: "rgba(16,185,129,0.05)", borderColor: "rgba(16,185,129,0.12)" },
+          { label: "ZONE C · EXIT", x: 2 * W / 3, w: W / 3, color: "rgba(168,85,247,0.06)", borderColor: "rgba(168,85,247,0.12)" },
         ];
+        ctx.setLineDash([]);
         for (const z of zones) {
           ctx.fillStyle = z.color;
           ctx.fillRect(z.x, 0, z.w, H);
           ctx.strokeStyle = z.borderColor;
           ctx.lineWidth = 1;
           ctx.setLineDash([6, 6]);
-          ctx.beginPath(); ctx.moveTo(z.x, 0); ctx.lineTo(z.x, H); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(z.x + z.w, 0); ctx.lineTo(z.x + z.w, H); ctx.stroke();
           ctx.setLineDash([]);
-          ctx.fillStyle = "rgba(148,163,184,0.4)";
-          ctx.font = "700 10px 'Inter', monospace";
-          ctx.fillText(z.label, z.x + 16, 26);
-        }
-
-        // Scan line (simulation mode only)
-        if (sourceMode === "simulation") {
-          const scanY = (t / 20) % H;
-          const sg = ctx.createLinearGradient(0, scanY - 60, 0, scanY + 60);
-          sg.addColorStop(0, "rgba(59,130,246,0)");
-          sg.addColorStop(0.5, "rgba(59,130,246,0.04)");
-          sg.addColorStop(1, "rgba(59,130,246,0)");
-          ctx.fillStyle = sg;
-          ctx.fillRect(0, scanY - 60, W, 120);
+          ctx.fillStyle = z.borderColor;
+          ctx.font = "700 9px monospace";
+          ctx.fillText(z.label, z.x + 12, 20);
         }
       }
+      ctx.setLineDash([]);
 
-      // ── Bounding boxes ───────────────────────────────────────
-      const anomalyIds = getAnomalyIds(anomalies);
+      // ── Tracks ─────────────────────────────────────────────────────────────
 
-      for (const tr of tracks) {
-        const isAnomalous = anomalyIds.has(tr.id);
-        const isPerson = tr.class_id === 0;
-        const isRunning = tr.running;
+      for (const track of tracks) {
+        const { x1, y1, x2, y2, class_id, class_name, running, id, confidence } = track;
+        const isAnomaly = anomalyIds.has(id);
+        const isPerson = class_id === 0;
 
-        let color = isPerson ? "#10b981" : "#f59e0b";
-        if (isRunning) color = "#a855f7";
-        else if (isAnomalous && !isPerson) color = "#ef4444";
-        else if (isAnomalous) color = "#f97316";
+        let color: string;
+        if (running) color = "#ef4444";
+        else if (isAnomaly) color = "#f97316";
+        else if (isPerson) color = "#3b82f6";
+        else color = "#f59e0b";
 
-        const bw = tr.x2 - tr.x1;
-        const bh = tr.y2 - tr.y1;
+        if (isAnomaly || running) { ctx.shadowBlur = 18; ctx.shadowColor = color; }
 
-        if (isAnomalous) { ctx.shadowColor = color; ctx.shadowBlur = 20; }
-        ctx.fillStyle = color + (isAnomalous ? "18" : "0e");
-        ctx.fillRect(tr.x1, tr.y1, bw, bh);
+        drawCornerMarker(ctx, x1, y1, x2, y2, color);
         ctx.shadowBlur = 0;
 
-        drawCornerMarker(ctx, tr.x1, tr.y1, tr.x2, tr.y2, color, isAnomalous ? 16 : 12);
-
-        // Confidence — real from YOLOv8n, or simulated fallback
-        const conf = tr.confidence !== undefined
-          ? tr.confidence
-          : 0.78 + (tr.id % 17) * 0.012;
-
-        const labelText = isRunning
-          ? `⚡ RUNNING  ${(conf * 100).toFixed(0)}%`
-          : `${tr.class_name.toUpperCase()}  ${(conf * 100).toFixed(0)}%`;
-
-        ctx.font = "600 11px 'Inter', monospace";
-        const tw = ctx.measureText(labelText).width + 12;
-        const lx = tr.x1;
-        const ly = tr.y1 - 22;
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 0.9;
-        roundRect(ctx, lx, ly, tw, 20, 4);
+        // Label
+        const confStr = confidence !== undefined ? ` ${(confidence * 100).toFixed(0)}%` : "";
+        const labelText = `#${id} ${class_name}${confStr}${running ? " RUNNING" : ""}`;
+        ctx.font = "600 10px monospace";
+        const tw = ctx.measureText(labelText).width;
+        const lx = Math.min(x1, W - tw - 14);
+        const ly = y1 > 22 ? y1 - 20 : y2 + 4;
+        roundRect(ctx, lx - 4, ly - 1, tw + 10, 16, 4);
+        ctx.fillStyle = color + "cc";
         ctx.fill();
-        ctx.globalAlpha = 1;
         ctx.fillStyle = "#fff";
-        ctx.font = "600 10px 'Inter', monospace";
-        ctx.fillText(labelText, lx + 6, ly + 14);
+        ctx.fillText(labelText, lx, ly + 11);
 
-        // Track ID + zone badge
-        const zoneLbl = tr.zone ? ` Z${tr.zone}` : "";
-        const idLabel = `#${tr.id}${zoneLbl}`;
-        ctx.font = "700 9px monospace";
-        const idW = ctx.measureText(idLabel).width + 8;
-        ctx.fillStyle = "rgba(0,0,0,0.6)";
-        roundRect(ctx, tr.x2 - idW, tr.y2 - 18, idW, 16, 3);
-        ctx.fill();
-        ctx.fillStyle = color;
-        ctx.fillText(idLabel, tr.x2 - idW + 4, tr.y2 - 5);
-      }
-
-      // ── Anomaly effects ──────────────────────────────────────
-      for (const a of anomalies) {
-        if (!a.position) continue;
-        const [ax, ay] = a.position;
-        const pulse = 0.5 + 0.5 * Math.sin(t / 160);
-
-        if (a.type === "running") {
-          for (let r = 0; r < 3; r++) {
-            ctx.beginPath();
-            ctx.arc(ax, ay, 55 + r * 20 + pulse * 10, 0, 2 * Math.PI);
-            ctx.strokeStyle = `rgba(168,85,247,${0.6 - r * 0.18})`;
-            ctx.lineWidth = 2 - r * 0.4;
-            ctx.setLineDash([6, 4]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-          }
-        } else if (a.type === "unattended_object") {
-          ctx.beginPath();
-          ctx.arc(ax, ay, 48 + pulse * 6, 0, 2 * Math.PI);
-          ctx.fillStyle = "rgba(239,68,68,0.1)";
-          ctx.fill();
-          ctx.strokeStyle = `rgba(239,68,68,${0.7 + pulse * 0.3})`;
-          ctx.lineWidth = 2;
-          ctx.stroke();
-          if (a.duration) {
-            ctx.fillStyle = "#ef4444";
-            ctx.font = "700 11px monospace";
-            ctx.fillText(`⚠ ${a.duration}s`, ax - 20, ay + 66);
-          }
-        } else if (a.type === "overcrowding") {
-          const hg = ctx.createRadialGradient(ax, ay, 0, ax, ay, 120);
-          hg.addColorStop(0, `rgba(249,115,22,${0.2 + pulse * 0.1})`);
-          hg.addColorStop(1, "rgba(249,115,22,0)");
-          ctx.fillStyle = hg;
-          ctx.beginPath();
-          ctx.arc(ax, ay, 120, 0, 2 * Math.PI);
-          ctx.fill();
+        // Running trail
+        if (running) {
+          const cx = (x1 + x2) / 2;
+          const cy = (y1 + y2) / 2;
+          ctx.fillStyle = color + "40";
+          ctx.globalAlpha = 0.5 + 0.5 * Math.abs(Math.sin(t / 200));
+          ctx.beginPath(); ctx.arc(cx, cy, 22, 0, 2 * Math.PI); ctx.fill();
+          ctx.globalAlpha = 1;
         }
       }
-      ctx.shadowBlur = 0;
 
-      // ── Alert banner ─────────────────────────────────────────
-      const hasRunning = anomalies.some(a => a.type === "running");
-      const hasUnattended = anomalies.some(a => a.type === "unattended_object");
-      const hasOvercrowding = anomalies.some(a => a.type === "overcrowding");
+      // ── Anomaly overlays ────────────────────────────────────────────────────
 
-      if (hasRunning || hasUnattended || hasOvercrowding) {
-        const bannerColor = hasRunning ? "#a855f7" : hasUnattended ? "#ef4444" : "#f97316";
-        const bannerText = hasRunning
-          ? "⚡  CRITICAL ALERT · RUNNING DETECTED"
-          : hasUnattended
-          ? "🚨  SECURITY ALERT · UNATTENDED OBJECT"
-          : "⚠  CROWD WARNING · OVERCROWDING DETECTED";
+      for (const anomaly of anomalies) {
+        if (!anomaly.position) continue;
+        const [ax, ay] = anomaly.position;
+        const pulse = 0.5 + 0.5 * Math.sin(t / 350);
 
-        const pulse = 0.5 + 0.5 * Math.sin(t / 160);
-        ctx.fillStyle = bannerColor;
-        ctx.globalAlpha = 0.15;
-        ctx.fillRect(0, 0, W, 52);
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = bannerColor;
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(0, 52); ctx.lineTo(W, 52); ctx.stroke();
-        ctx.fillStyle = "#fff";
-        ctx.font = "700 18px 'Inter', sans-serif";
-        ctx.fillText(bannerText, 24, 34);
-        ctx.beginPath();
-        ctx.arc(W - 24, 26, 5 + pulse * 2, 0, 2 * Math.PI);
-        ctx.fillStyle = bannerColor;
-        ctx.globalAlpha = 0.88 + 0.12 * Math.sin(t / 300);
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        if (anomaly.type === "overcrowding") {
+          ctx.strokeStyle = `rgba(239,68,68,${0.3 + 0.3 * pulse})`;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([8, 6]);
+          ctx.beginPath(); ctx.arc(ax, ay, 80, 0, 2 * Math.PI); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = `rgba(239,68,68,${0.08 + 0.06 * pulse})`;
+          ctx.beginPath(); ctx.arc(ax, ay, 80, 0, 2 * Math.PI); ctx.fill();
+          ctx.font = "700 10px monospace";
+          ctx.fillStyle = "#ef4444";
+          const txt = `⚠ OVERCROWDING${anomaly.count ? ` · ${anomaly.count} PPL` : ""}`;
+          ctx.fillText(txt, ax - ctx.measureText(txt).width / 2, ay - 90);
+        } else if (anomaly.type === "unattended_object") {
+          ctx.strokeStyle = `rgba(249,115,22,${0.4 + 0.3 * pulse})`;
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([5, 5]);
+          ctx.strokeRect(ax - 30, ay - 30, 60, 60);
+          ctx.setLineDash([]);
+          ctx.font = "700 10px monospace";
+          ctx.fillStyle = "#f97316";
+          const txt = "⚠ UNATTENDED OBJECT";
+          ctx.fillText(txt, ax - ctx.measureText(txt).width / 2, ay - 38);
+        } else if (anomaly.type === "running") {
+          ctx.strokeStyle = `rgba(239,68,68,${0.4 + 0.3 * pulse})`;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([4, 4]);
+          if (anomaly.position) {
+            ctx.beginPath(); ctx.arc(ax, ay, 50, 0, 2 * Math.PI); ctx.stroke();
+          }
+          ctx.setLineDash([]);
+        }
       }
 
-      // ── Timestamp & mode badge ────────────────────────────────
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      roundRect(ctx, 12, H - 36, 240, 26, 6);
-      ctx.fill();
-      ctx.fillStyle = "#64748b";
-      ctx.font = "11px monospace";
-      ctx.fillText(
-        `${new Date().toLocaleTimeString("en-IN")}  ·  ${
-          sourceMode === "video" ? "YOLO DETECT" : cameraMode === "webcam" ? "CAMERA LIVE" : "SIMULATION"
-        }`,
-        20, H - 17
-      );
+      // ── HUD ────────────────────────────────────────────────────────────────
 
-      const modeBadge = sourceMode === "video" ? "⚡ YOLO LIVE" : "● REC  LIVE";
-      const badgeW = 120;
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      const modeLabel = (() => {
+        if (sourceMode === "video") return "YOLO · VIDEO";
+        if (sourceMode === "webcam") return "YOLO · WEBCAM";
+        if (sourceMode === "stream") return "YOLO · STREAM";
+        return "SIMULATION";
+      })();
+
+      const modeColor = (() => {
+        if (sourceMode === "video") return "#a855f7";
+        if (sourceMode === "webcam") return "#10b981";
+        if (sourceMode === "stream") return "#f59e0b";
+        return "#475569";
+      })();
+
+      // Bottom-left: time + mode
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      roundRect(ctx, 12, H - 36, 220, 26, 6);
+      ctx.fill();
+      ctx.fillStyle = modeColor;
+      ctx.font = "11px monospace";
+      ctx.fillText(`${new Date().toLocaleTimeString("en-IN")}  ·  ${modeLabel}`, 20, H - 17);
+
+      // Bottom-right: live badge
+      const isReal = sourceMode !== "simulation";
+      const badgeText = isReal ? "⚡ LIVE DETECT" : "◉ SIM MODE";
+      const badgeW = 126;
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
       roundRect(ctx, W - badgeW - 12, H - 36, badgeW, 26, 6);
       ctx.fill();
-      if (sourceMode !== "video") {
+
+      if (!isReal) {
         const recPulse = Math.sin(t / 700) > 0;
         if (recPulse) {
-          ctx.fillStyle = "#ef4444";
+          ctx.fillStyle = "#334155";
           ctx.beginPath(); ctx.arc(W - badgeW - 2, H - 23, 5, 0, 2 * Math.PI); ctx.fill();
         }
       }
-      ctx.fillStyle = sourceMode === "video" ? "#a855f7" : "#94a3b8";
+
+      ctx.fillStyle = modeColor;
       ctx.font = "700 10px monospace";
-      ctx.fillText(modeBadge, W - badgeW, H - 17);
+      ctx.fillText(badgeText, W - badgeW, H - 17);
 
       rafRef.current = requestAnimationFrame(draw);
     }

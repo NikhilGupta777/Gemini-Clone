@@ -2,7 +2,7 @@
 
 ## Overview
 
-Full-stack surveillance and anomaly detection simulation system for a college project. A Python FastAPI backend simulates crowd movements and detects anomalies in real-time. A React + Vite frontend renders a live surveillance dashboard with WebSocket-powered bounding boxes, stats, and incident logs.
+Full-stack real-time surveillance and anomaly detection system. A Python FastAPI backend can run real YOLOv8n + SORT tracking on live webcam frames, uploaded video files, and RTSP/HTTP streams. Falls back to simulation mode when no real source is active. React + Vite frontend renders a live surveillance dashboard with WebSocket-powered bounding boxes, stats, and incident logs.
 
 ## Stack
 
@@ -12,66 +12,75 @@ Full-stack surveillance and anomaly detection simulation system for a college pr
 - **Package manager**: pnpm + uv (Python)
 - **Frontend**: React 19 + Vite 7 + TailwindCSS v4 + shadcn/ui
 - **Backend**: Python FastAPI + uvicorn + WebSockets + numpy
-- **Real-time**: WebSocket (simulation frames at 10 fps)
+- **Computer vision**: YOLOv8n (ultralytics) + OpenCV headless
+- **Real-time**: WebSocket at 10 fps; webcam frames sent browser → `/ws/cam`
 - **Routing**: wouter (frontend SPA)
+
+## Detection Modes
+
+1. **Simulation** — synthetic entities with anomaly injection (fallback/default)
+2. **Video Upload** — real YOLOv8n inference on uploaded MP4/AVI/MOV (up to 500 MB)
+3. **Webcam (browser)** — JPEG frames captured at 10 fps by `useCamProcessor` hook, sent over `/ws/cam`, processed server-side with YOLO + SORT
+4. **RTSP/HTTP Stream** — backend opens any RTSP or HTTP camera URL with OpenCV, runs YOLO + SORT in a background thread
 
 ## Features
 
 - **Live Surveillance Canvas** — Canvas2D rendering of tracked entities with bounding boxes, zone overlays (ZONE A/B/C), scan-line animation, REC indicator
-- **Anomaly Detection** — Three detection types:
-  - **Running** (purple) — person speed exceeds threshold
-  - **Unattended Object** (red) — object stationary for > N seconds
-  - **Overcrowding** (orange) — person count exceeds threshold
-- **Stats Cards** — Live occupancy, threat level (with pulse animation), total tracks, system uptime
-- **Alert History** — Full incident log table with timestamp, type, details, position; auto-refreshes every 2s
-- **Settings** — Real-time threshold tuning (overcrowding limit, running speed, unattended time, stationary distance) via sliders with live PUT to backend
-- **Threat Level Header** — SYSTEM SECURE / ALERT ACTIVE / THREAT DETECTED with blinking indicator
+- **Mode HUD badges** — YOLO·WEBCAM / YOLO·VIDEO / YOLO·STREAM / SIMULATION shown on the canvas
+- **Anomaly Detection** — Running, Unattended Object, Overcrowding
+- **Stats Cards** — Live occupancy, threat level, total tracks, system uptime
+- **Alert History** — Full incident log table with timestamp, type, details, position
+- **Settings** — Real-time threshold tuning via sliders with live PUT to backend
 
 ## Structure
 
 ```
 ├── artifacts/company-ai/          # React+Vite surveillance dashboard
 │   ├── src/
-│   │   ├── App.tsx                # Root app, threat level logic
-│   │   ├── hooks/useSimulation.ts # WebSocket hook w/ auto-reconnect
+│   │   ├── App.tsx
+│   │   ├── hooks/
+│   │   │   ├── useSimulation.ts   # WebSocket hook (simulation frames)
+│   │   │   └── useCamProcessor.ts # Captures webcam → sends JPEG to /ws/cam
 │   │   ├── pages/
-│   │   │   ├── Dashboard.tsx      # Main canvas + stats + alerts
-│   │   │   ├── AlertHistory.tsx   # Incident log table
-│   │   │   └── Settings.tsx       # Threshold configuration
+│   │   │   ├── Dashboard.tsx      # Video upload + stream panels + webcam button
+│   │   │   ├── AlertHistory.tsx
+│   │   │   └── Settings.tsx
 │   │   └── components/
-│   │       ├── Layout.tsx         # Sidebar nav + header
-│   │       ├── SimulationCanvas.tsx # Canvas2D rendering engine
-│   │       ├── StatsCards.tsx     # Live stat panels
-│   │       └── AlertsFeed.tsx     # Active incidents panel
+│   │       ├── Layout.tsx
+│   │       ├── SimulationCanvas.tsx # Renders all 4 modes
+│   │       ├── StatsCards.tsx
+│   │       └── AlertsFeed.tsx
 │   └── vite.config.ts             # Proxy /api + /ws → port 8080
 ├── backend/
-│   ├── main.py                    # FastAPI app, WebSocket endpoint, REST API
+│   ├── main.py                    # FastAPI, all endpoints, all processing loops
+│   ├── detector.py                # YOLOv8n + SORT tracker wrapper
 │   ├── simulation.py              # Entity simulation engine
 │   ├── anomaly.py                 # Anomaly detection logic
 │   └── config.py                  # Detection thresholds and COCO classes
-├── lib/
-│   ├── api-client-react/          # (unused by CrowdLens, from prior scaffold)
-│   └── ...
 ```
 
 ## Running
 
-- **Frontend**: `artifacts/company-ai: web` workflow — Vite dev server on port 18611
+- **Frontend**: `Frontend` workflow — Vite dev server on port 3000
 - **Backend**: `Start application` workflow — uvicorn on port 8080
 - Frontend proxies `/api` and `/ws` to the Python backend
 
-## API Endpoints (Python FastAPI)
+## API Endpoints
 
 - `GET /api/health` — health check
-- `GET /api/stats` — current simulation stats
+- `GET /api/stats` — current stats
 - `GET /api/alerts/history?limit=N` — incident log
-- `GET /api/config` — current detection thresholds
-- `PUT /api/config` — update thresholds (live, no restart needed)
-- `WS /ws` — real-time simulation frames at 10 fps
+- `GET /api/config` / `PUT /api/config` — detection thresholds
+- `GET /api/video/status` — video processing status + model_ready
+- `POST /api/video/upload` — upload video file for YOLO processing
+- `POST /api/video/stop`
+- `POST /api/webcam/start` / `POST /api/webcam/stop`
+- `GET /api/stream/status` — stream status + model_ready
+- `POST /api/stream/start` (body: `{"url": "rtsp://..."}`)
+- `POST /api/stream/stop`
+- `WS /ws` — simulation/video/stream detection frames at 10 fps
+- `WS /ws/cam` — receives JPEG binary frames from browser webcam
 
-## Detection Config Defaults
+## Nix System Dependencies
 
-- Overcrowding threshold: 2 people
-- Running speed threshold: 20 px/frame
-- Unattended object time: 5 seconds
-- Stationary distance: 150 px
+Includes `xorg.libxcb`, `xorg.libX11`, `xorg.libXext` — required by OpenCV headless for internal threading even without a display.

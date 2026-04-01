@@ -6,6 +6,7 @@ import threading
 from collections import deque
 from contextlib import asynccontextmanager
 
+import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -18,7 +19,7 @@ from backend.config import (
 )
 from backend.detector import _download_model, is_model_ready, get_model_error
 
-# ─── State ──────────────────────────────────────────────────────────────────
+# ─── Global State ─────────────────────────────────────────────────────────────
 
 simulation = SimulationEngine()
 sim_anomaly_detector = AnomalyDetector()
@@ -46,11 +47,12 @@ _alert_cooldowns: dict = {}
 _ALERT_COOLDOWN_SECS = 5.0
 _alert_id_counter = 0
 
-# ─── Video mode state ────────────────────────────────────────────────────────
+# ─── Processing mode state ────────────────────────────────────────────────────
+# Modes: "simulation" | "video" | "webcam" | "stream"
 
 VIDEO_UPLOAD_PATH = "/tmp/crowdlens_upload.mp4"
-_processing_mode = "simulation"   # "simulation" | "video"
-_video_task: asyncio.Task | None = None
+_processing_mode = "simulation"
+_active_task: asyncio.Task | None = None
 _video_anomaly_detector = AnomalyDetector()
 
 video_status = {
@@ -64,8 +66,17 @@ video_status = {
     "error": None,
 }
 
+stream_status = {
+    "active": False,
+    "url": None,
+    "error": None,
+}
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
+# Shared queue for webcam frames arriving over WebSocket
+_cam_frame_queue: asyncio.Queue = asyncio.Queue(maxsize=4)
+
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _get_zone(cx: float) -> str:
     from backend.config import FRAME_WIDTH
@@ -84,7 +95,7 @@ def _should_record_alert(anomaly: dict, now: float) -> bool:
     return False
 
 
-def build_frame_payload(tracks: list, anomalies: list, now: float) -> dict:
+def build_frame_payload(tracks: list, anomalies: list, now: float, mode: str | None = None) -> dict:
     person_count = sum(1 for t in tracks if t["class_id"] == 0)
     object_count = sum(1 for t in tracks if t["class_id"] != 0)
 
@@ -111,6 +122,7 @@ def build_frame_payload(tracks: list, anomalies: list, now: float) -> dict:
         serializable_anomalies.append(sa)
 
     global _alert_id_counter
+    effective_mode = mode or _processing_mode
     for a in serializable_anomalies:
         if _should_record_alert(a, now):
             _alert_id_counter += 1
@@ -119,7 +131,7 @@ def build_frame_payload(tracks: list, anomalies: list, now: float) -> dict:
                 "anomaly": a,
                 "timestamp": now,
                 "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
-                "source": _processing_mode,
+                "source": effective_mode,
             })
 
     return {
@@ -127,7 +139,7 @@ def build_frame_payload(tracks: list, anomalies: list, now: float) -> dict:
         "anomalies": serializable_anomalies,
         "stats": stats_snapshot.copy(),
         "timestamp": now,
-        "mode": _processing_mode,
+        "mode": effective_mode,
     }
 
 
@@ -147,10 +159,42 @@ async def _broadcast(message: str):
         except Exception:
             dead.append(ws)
     for d in dead:
-        connected_clients.remove(d)
+        if d in connected_clients:
+            connected_clients.remove(d)
 
 
-# ─── Simulation loop ─────────────────────────────────────────────────────────
+def _cancel_active():
+    global _active_task
+    if _active_task and not _active_task.done():
+        _active_task.cancel()
+        _active_task = None
+
+
+def _build_tracks_from_yolo(raw_tracks: list) -> list:
+    tracks = []
+    for t in raw_tracks:
+        x1, y1, x2, y2 = [max(0, int(v)) for v in t["bbox"]]
+        cx = (x1 + x2) / 2
+        tracks.append({
+            "id": t["id"],
+            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+            "class_id": t["class_id"],
+            "class_name": COCO_CLASSES.get(t["class_id"], "object"),
+            "running": False,
+            "confidence": round(t.get("confidence", 0), 2),
+            "zone": _get_zone(cx),
+        })
+    return tracks
+
+
+def _finalize_tracks(tracks: list, anomalies: list) -> list:
+    running_ids = {a.get("track_id") for a in anomalies if a["type"] == "running"}
+    for t in tracks:
+        t["running"] = t["id"] in running_ids
+    return tracks
+
+
+# ─── Simulation loop ──────────────────────────────────────────────────────────
 
 async def simulation_loop():
     interval = 0.1
@@ -161,12 +205,9 @@ async def simulation_loop():
             tracks = simulation.tick()
             now = time.time()
             anomalies = sim_anomaly_detector.update(tracks, now)
-
-            # Add zone to tracks
             for t in tracks:
                 cx = (t["x1"] + t["x2"]) / 2
                 t["zone"] = _get_zone(cx)
-
             payload = build_frame_payload(tracks, anomalies, now)
             await _broadcast(json.dumps(payload))
 
@@ -210,7 +251,6 @@ async def video_processing_loop():
         while True:
             ret, frame = cap.read()
             if not ret:
-                # Loop video
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 frame_num = 0
                 tracker.reset()
@@ -221,46 +261,21 @@ async def video_processing_loop():
             video_status["current_frame"] = frame_num
             video_status["progress"] = round((frame_num / total * 100), 1) if total > 0 else 0
 
-            # Resize to match canvas dimensions
             frame = cv2.resize(frame, (1280, 720))
-
-            # Run YOLOv8n detection (ultralytics)
             detections = detector.detect(frame)
-
-            # Run SORT tracking
             raw_tracks = tracker.update(detections)
-
-            # Build track list in our standard format
-            tracks = []
-            for t in raw_tracks:
-                x1, y1, x2, y2 = [max(0, int(v)) for v in t["bbox"]]
-                cx = (x1 + x2) / 2
-                tracks.append({
-                    "id": t["id"],
-                    "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                    "class_id": t["class_id"],
-                    "class_name": COCO_CLASSES.get(t["class_id"], "object"),
-                    "running": False,
-                    "confidence": round(t["confidence"], 2),
-                    "zone": _get_zone(cx),
-                })
 
             now = time.time()
             _apply_config()
+            tracks = _build_tracks_from_yolo(raw_tracks)
             anomalies = _video_anomaly_detector.update(tracks, now)
+            tracks = _finalize_tracks(tracks, anomalies)
 
-            # Mark running tracks
-            running_ids = {
-                a.get("track_id") for a in anomalies if a["type"] == "running"
-            }
-            for t in tracks:
-                t["running"] = t["id"] in running_ids
-
-            payload = build_frame_payload(tracks, anomalies, now)
+            payload = build_frame_payload(tracks, anomalies, now, "video")
             if connected_clients:
                 await _broadcast(json.dumps(payload))
 
-            await asyncio.sleep(0.04)  # ~25fps cap; actual FPS limited by YOLO speed
+            await asyncio.sleep(0.04)
 
     except asyncio.CancelledError:
         pass
@@ -269,11 +284,151 @@ async def video_processing_loop():
         video_status["progress"] = 0
 
 
-# ─── Lifespan ────────────────────────────────────────────────────────────────
+# ─── Stream processing loop (RTSP / HTTP / IP camera) ─────────────────────────
+
+async def stream_processing_loop(url: str):
+    global _video_anomaly_detector
+    import cv2
+
+    stream_status["error"] = None
+    stream_status["active"] = True
+
+    try:
+        from backend.detector import YOLOv8Detector
+        from backend.sort_tracker import Sort
+    except Exception as e:
+        stream_status["error"] = f"Failed to load detector: {e}"
+        stream_status["active"] = False
+        return
+
+    try:
+        detector = YOLOv8Detector()
+        tracker = Sort(max_age=5, min_hits=2, iou_threshold=0.3)
+        _video_anomaly_detector = AnomalyDetector()
+    except Exception as e:
+        stream_status["error"] = f"Detector init failed: {e}"
+        stream_status["active"] = False
+        return
+
+    def open_capture():
+        cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        return cap
+
+    loop = asyncio.get_event_loop()
+    cap = await loop.run_in_executor(None, open_capture)
+
+    if not cap.isOpened():
+        stream_status["error"] = f"Could not open stream: {url}"
+        stream_status["active"] = False
+        return
+
+    print(f"[stream] Opened stream: {url}")
+    consecutive_fails = 0
+
+    try:
+        while True:
+            ret, frame = await loop.run_in_executor(None, cap.read)
+            if not ret:
+                consecutive_fails += 1
+                if consecutive_fails > 30:
+                    stream_status["error"] = "Stream lost — too many consecutive read failures"
+                    break
+                await asyncio.sleep(0.05)
+                continue
+
+            consecutive_fails = 0
+            frame = cv2.resize(frame, (1280, 720))
+            detections = await loop.run_in_executor(None, detector.detect, frame)
+            raw_tracks = tracker.update(detections)
+
+            now = time.time()
+            _apply_config()
+            tracks = _build_tracks_from_yolo(raw_tracks)
+            anomalies = _video_anomaly_detector.update(tracks, now)
+            tracks = _finalize_tracks(tracks, anomalies)
+
+            payload = build_frame_payload(tracks, anomalies, now, "stream")
+            if connected_clients:
+                await _broadcast(json.dumps(payload))
+
+            await asyncio.sleep(0.04)
+
+    except asyncio.CancelledError:
+        pass
+    finally:
+        cap.release()
+        stream_status["active"] = False
+        stream_status["url"] = None
+        print("[stream] Stream processing stopped")
+
+
+# ─── Webcam frame processing loop ─────────────────────────────────────────────
+
+async def webcam_processing_loop():
+    """Pulls JPEG frames from _cam_frame_queue, runs YOLO+SORT, broadcasts."""
+    global _video_anomaly_detector
+    import cv2
+
+    try:
+        from backend.detector import YOLOv8Detector
+        from backend.sort_tracker import Sort
+    except Exception as e:
+        print(f"[webcam] Failed to load detector: {e}")
+        return
+
+    try:
+        detector = YOLOv8Detector()
+        tracker = Sort(max_age=3, min_hits=2, iou_threshold=0.3)
+        anomaly_detector = AnomalyDetector()
+    except Exception as e:
+        print(f"[webcam] Detector init failed: {e}")
+        return
+
+    print("[webcam] Webcam processing loop started")
+
+    try:
+        while True:
+            try:
+                jpeg_bytes = await asyncio.wait_for(_cam_frame_queue.get(), timeout=5.0)
+            except asyncio.TimeoutError:
+                if _processing_mode != "webcam":
+                    break
+                continue
+
+            if _processing_mode != "webcam":
+                break
+
+            # Decode JPEG bytes → numpy frame
+            arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame is None:
+                continue
+
+            frame = cv2.resize(frame, (1280, 720))
+            detections = detector.detect(frame)
+            raw_tracks = tracker.update(detections)
+
+            now = time.time()
+            _apply_config()
+            tracks = _build_tracks_from_yolo(raw_tracks)
+            anomalies = anomaly_detector.update(tracks, now)
+            tracks = _finalize_tracks(tracks, anomalies)
+
+            payload = build_frame_payload(tracks, anomalies, now, "webcam")
+            if connected_clients:
+                await _broadcast(json.dumps(payload))
+
+    except asyncio.CancelledError:
+        pass
+    finally:
+        print("[webcam] Webcam processing loop stopped")
+
+
+# ─── Lifespan ─────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start model download in background thread (non-blocking)
     thread = threading.Thread(target=_download_model, daemon=True)
     thread.start()
 
@@ -281,8 +436,7 @@ async def lifespan(app: FastAPI):
     yield
 
     sim_task.cancel()
-    if _video_task and not _video_task.done():
-        _video_task.cancel()
+    _cancel_active()
 
     try:
         await sim_task
@@ -290,7 +444,7 @@ async def lifespan(app: FastAPI):
         pass
 
 
-# ─── App ─────────────────────────────────────────────────────────────────────
+# ─── App ──────────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="CrowdLens API", lifespan=lifespan)
 
@@ -358,8 +512,8 @@ async def upload_video(file: UploadFile = File(...)):
         raise HTTPException(400, "Unsupported video format")
 
     content = await file.read()
-    if len(content) > 200 * 1024 * 1024:
-        raise HTTPException(400, "File too large (max 200 MB)")
+    if len(content) > 500 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 500 MB)")
 
     with open(VIDEO_UPLOAD_PATH, "wb") as f:
         f.write(content)
@@ -372,27 +526,23 @@ async def upload_video(file: UploadFile = File(...)):
 
 @app.post("/api/video/start")
 async def start_video():
-    global _processing_mode, _video_task
+    global _processing_mode, _active_task
     if not os.path.exists(VIDEO_UPLOAD_PATH):
         raise HTTPException(400, "No video uploaded yet")
     if not is_model_ready():
         raise HTTPException(503, "YOLOv8n model is still loading, please wait")
 
-    if _video_task and not _video_task.done():
-        _video_task.cancel()
-
+    _cancel_active()
     _processing_mode = "video"
     video_status["mode"] = "processing"
-    _video_task = asyncio.create_task(video_processing_loop())
+    _active_task = asyncio.create_task(video_processing_loop())
     return {"success": True}
 
 
 @app.post("/api/video/stop")
 async def stop_video():
-    global _processing_mode, _video_task
-    if _video_task and not _video_task.done():
-        _video_task.cancel()
-        _video_task = None
+    global _processing_mode
+    _cancel_active()
     _processing_mode = "simulation"
     video_status["mode"] = "simulation"
     video_status["progress"] = 0
@@ -408,7 +558,76 @@ def get_video_status():
     }
 
 
-# ─── WebSocket ────────────────────────────────────────────────────────────────
+# ─── Stream endpoints ─────────────────────────────────────────────────────────
+
+class StreamRequest(BaseModel):
+    url: str
+
+
+@app.post("/api/stream/start")
+async def start_stream(body: StreamRequest):
+    global _processing_mode, _active_task
+    if not is_model_ready():
+        raise HTTPException(503, "YOLOv8n model not ready yet — please wait")
+    if not body.url.strip():
+        raise HTTPException(400, "Stream URL is required")
+
+    _cancel_active()
+    _processing_mode = "stream"
+    stream_status["url"] = body.url.strip()
+    stream_status["error"] = None
+    _active_task = asyncio.create_task(stream_processing_loop(body.url.strip()))
+    return {"success": True}
+
+
+@app.post("/api/stream/stop")
+async def stop_stream():
+    global _processing_mode
+    _cancel_active()
+    _processing_mode = "simulation"
+    stream_status["active"] = False
+    stream_status["url"] = None
+    return {"success": True}
+
+
+@app.get("/api/stream/status")
+def get_stream_status():
+    return {
+        **stream_status,
+        "model_ready": is_model_ready(),
+        "model_error": get_model_error(),
+    }
+
+
+# ─── Webcam mode endpoints ────────────────────────────────────────────────────
+
+@app.post("/api/webcam/start")
+async def start_webcam():
+    global _processing_mode, _active_task
+    if not is_model_ready():
+        raise HTTPException(503, "YOLOv8n model not ready yet — please wait")
+
+    _cancel_active()
+    _processing_mode = "webcam"
+    # Drain old frames
+    while not _cam_frame_queue.empty():
+        try:
+            _cam_frame_queue.get_nowait()
+        except Exception:
+            break
+    _active_task = asyncio.create_task(webcam_processing_loop())
+    return {"success": True}
+
+
+@app.post("/api/webcam/stop")
+async def stop_webcam():
+    global _processing_mode
+    _cancel_active()
+    _processing_mode = "simulation"
+    return {"success": True}
+
+
+# ─── WebSocket: dashboard data broadcast ──────────────────────────────────────
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -420,3 +639,22 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         if websocket in connected_clients:
             connected_clients.remove(websocket)
+
+
+# ─── WebSocket: webcam frame receiver ────────────────────────────────────────
+
+@app.websocket("/ws/cam")
+async def webcam_ws(websocket: WebSocket):
+    """Browser sends JPEG frames as binary; we queue them for YOLO processing."""
+    await websocket.accept()
+    print("[ws/cam] Webcam client connected")
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            if _processing_mode == "webcam":
+                try:
+                    _cam_frame_queue.put_nowait(data)
+                except asyncio.QueueFull:
+                    pass  # Drop frame if queue is full — processing can't keep up
+    except WebSocketDisconnect:
+        print("[ws/cam] Webcam client disconnected")
