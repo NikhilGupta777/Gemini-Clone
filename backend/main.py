@@ -202,8 +202,10 @@ def _finalize_tracks(tracks: list, anomalies: list) -> list:
 def _encode_preview(frame) -> str:
     """Encode a cv2 frame as a compact base64 JPEG for WebSocket transmission."""
     import cv2
-    preview = cv2.resize(frame, (640, 360))
-    _, buf = cv2.imencode(".jpg", preview, [cv2.IMWRITE_JPEG_QUALITY, 55])
+    h, w = frame.shape[:2]
+    if w != 640 or h != 360:
+        frame = cv2.resize(frame, (640, 360))
+    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 55])
     return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
@@ -290,7 +292,9 @@ async def stream_processing_loop(url: str):
     global _video_anomaly_detector
     import subprocess
 
-    W, H = 1280, 720
+    # Use 640x360 so raw frames are 4× smaller (691 KB vs 2.7 MB).
+    # YOLO internally resizes to 640px anyway, so there's no detection quality loss.
+    W, H = 640, 360
     FRAME_BYTES = W * H * 3
 
     stream_status["error"] = None
@@ -319,6 +323,11 @@ async def stream_processing_loop(url: str):
     # (stderr fills the 64 KB pipe buffer → FFmpeg blocks → stdout stalls)
     _stderr_path = tempfile.mktemp(suffix=".ffmpeg_err.txt")
 
+    # Target processing rate: YOLO on CPU manages ~8 fps realistically.
+    # Capping FFmpeg output at this rate prevents frame pile-up that causes
+    # the "slow motion" effect (buffer fills faster than YOLO can drain it).
+    STREAM_FPS = 8
+
     def _build_cmd() -> list[str]:
         cmd = ["ffmpeg", "-y", "-loglevel", "error"]
         if url.lower().startswith("rtsp://"):
@@ -327,7 +336,7 @@ async def stream_processing_loop(url: str):
             "-i", url,
             "-f", "rawvideo",
             "-pix_fmt", "bgr24",
-            "-vf", f"scale={W}:{H}",
+            "-vf", f"scale={W}:{H},fps={STREAM_FPS}",
             "-",
         ]
         return cmd
@@ -414,7 +423,9 @@ async def stream_processing_loop(url: str):
             if connected_clients:
                 await _broadcast(json.dumps(payload))
 
-            await asyncio.sleep(0.04)
+            # Yield to the event loop briefly; FFmpeg's fps= filter is the
+            # real rate limiter — no additional sleep needed here.
+            await asyncio.sleep(0)
 
     except asyncio.CancelledError:
         pass
