@@ -40,7 +40,7 @@ function exportCSV(alerts: AlertRecord[]) {
       r.anomaly.duration ?? "",
       r.anomaly.position ? Math.round(r.anomaly.position[0]) : "",
       r.anomaly.position ? Math.round(r.anomaly.position[1]) : "",
-      r.source ?? "simulation",
+      (r.source ?? "live").toUpperCase(),
     ].join(",");
   });
   const csv = [headers.join(","), ...rows].join("\n");
@@ -322,10 +322,19 @@ export default function AlertHistory() {
                     <td style={{ padding: "11px 18px" }}>
                       <span style={{
                         fontSize: 9, fontWeight: 700, letterSpacing: 1, padding: "2px 8px", borderRadius: 6,
-                        background: record.source === "video" ? "rgba(168,85,247,0.1)" : "rgba(59,130,246,0.1)",
-                        color: record.source === "video" ? "#a855f7" : "#3b82f6",
+                        background:
+                          record.source === "video" ? "rgba(168,85,247,0.1)"
+                          : record.source === "stream" ? "rgba(245,158,11,0.1)"
+                          : "rgba(16,185,129,0.1)",
+                        color:
+                          record.source === "video" ? "#a855f7"
+                          : record.source === "stream" ? "#f59e0b"
+                          : "#10b981",
                       }}>
-                        {record.source === "video" ? "YOLO" : "SIM"}
+                        {record.source === "video" ? "VIDEO"
+                          : record.source === "stream" ? "STREAM"
+                          : record.source === "webcam" ? "WEBCAM"
+                          : (record.source ?? "LIVE").toUpperCase()}
                       </span>
                     </td>
                   </tr>

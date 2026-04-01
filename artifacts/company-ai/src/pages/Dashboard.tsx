@@ -1,20 +1,15 @@
 import { useRef, useState, useCallback, useEffect } from "react";
-import { FrameData } from "../hooks/useSimulation";
+import { useDetection } from "../context/DetectionContext";
 import { useAlertSound } from "../hooks/useAlertSound";
 import { useCamProcessor } from "../hooks/useCamProcessor";
 import SimulationCanvas from "../components/SimulationCanvas";
 import StatsCards from "../components/StatsCards";
 import AlertsFeed from "../components/AlertsFeed";
 import {
-  Camera, CameraOff, Monitor, Cpu, Users, Package,
+  Camera, Monitor, Cpu, Users, Package,
   AlertTriangle, Activity, Upload, Video, StopCircle,
   CheckCircle, Loader, Volume2, VolumeX, Radio, Link, X,
 } from "lucide-react";
-
-interface Props {
-  frame: FrameData | null;
-  connected: boolean;
-}
 
 interface VideoStatusData {
   mode: string;
@@ -54,28 +49,27 @@ const PILL_STYLE = {
 };
 
 type ActivePanel = "none" | "video" | "stream";
+type SourceMode = "idle" | "webcam" | "video" | "stream";
 
-export default function Dashboard({ frame, connected }: Props) {
-  const [sourceMode, setSourceMode] = useState<"simulation" | "webcam" | "video" | "stream">("simulation");
+export default function Dashboard() {
+  const { frame, connected } = useDetection();
+
+  const [sourceMode, setSourceMode] = useState<SourceMode>("idle");
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [activePanel, setActivePanel] = useState<ActivePanel>("none");
 
-  // Video upload state
   const [videoStatus, setVideoStatus] = useState<VideoStatusData | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
-  // Stream state
   const [streamStatus, setStreamStatus] = useState<StreamStatusData | null>(null);
   const [streamUrl, setStreamUrl] = useState("");
   const [streamError, setStreamError] = useState<string | null>(null);
 
-  // Webcam status from backend
   const [webcamStatus, setWebcamStatus] = useState<WebcamStatusData | null>(null);
 
-  // Refs
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,18 +77,16 @@ export default function Dashboard({ frame, connected }: Props) {
   const tracks = frame?.tracks ?? [];
   const anomalies = frame?.anomalies ?? [];
   const stats = frame?.stats ?? null;
-  // Use server-reported mode when available (for video/stream), else use local state
-  const displayMode = frame?.mode ?? sourceMode;
+  const displayMode = (frame?.mode as SourceMode) ?? sourceMode;
 
   useAlertSound(anomalies, soundEnabled);
 
-  // Hook: send webcam frames to backend for REAL YOLO processing
   useCamProcessor(
-    sourceMode === "webcam" ? videoElRef.current : null,
+    sourceMode === "webcam" ? videoElRef : null,
     sourceMode === "webcam",
   );
 
-  // Poll video status
+  // Poll video status — no dependencies so interval is stable
   useEffect(() => {
     const poll = async () => {
       try {
@@ -108,14 +100,13 @@ export default function Dashboard({ frame, connected }: Props) {
     return () => clearInterval(id);
   }, []);
 
-  // Poll stream status
+  // Poll stream status — stable interval, no side-effect mode changes
   useEffect(() => {
     const poll = async () => {
       try {
         const res = await fetch("/api/stream/status");
         const data = await res.json();
         setStreamStatus(data);
-        if (data.active) setSourceMode("stream");
       } catch {}
     };
     poll();
@@ -123,46 +114,45 @@ export default function Dashboard({ frame, connected }: Props) {
     return () => clearInterval(id);
   }, []);
 
-  // Poll webcam status
+  // Poll webcam status — stable interval, no sourceMode dependency
   useEffect(() => {
     const poll = async () => {
       try {
         const res = await fetch("/api/webcam/status");
         const data = await res.json();
         setWebcamStatus(data);
-        // If backend says not active but we think we're in webcam mode, it means the loop crashed
-        if (!data.active && data.error && sourceMode === "webcam") {
-          setCameraError(`Backend error: ${data.error}`);
-        }
       } catch {}
     };
     poll();
     const id = setInterval(poll, 2000);
     return () => clearInterval(id);
-  }, [sourceMode]);
+  }, []);
 
   // ── Webcam ──────────────────────────────────────────────────────────────────
 
   const enableCamera = useCallback(async () => {
     setCameraError(null);
     try {
+      // Stop any existing tracks
       mediaStreamRef.current?.getTracks().forEach(t => t.stop());
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       });
       mediaStreamRef.current = stream;
 
+      // Reuse existing video element or create once
       if (!videoElRef.current) {
         const vid = document.createElement("video");
         vid.muted = true;
         vid.playsInline = true;
+        vid.autoplay = true;
         videoElRef.current = vid;
       }
       videoElRef.current.srcObject = stream;
       await videoElRef.current.play();
 
-      // Tell backend to start webcam mode (spins up YOLO processor)
       const res = await fetch("/api/webcam/start", { method: "POST" });
       if (!res.ok) {
         const d = await res.json();
@@ -173,15 +163,19 @@ export default function Dashboard({ frame, connected }: Props) {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Camera access denied";
       setCameraError(msg);
+      mediaStreamRef.current?.getTracks().forEach(t => t.stop());
+      mediaStreamRef.current = null;
     }
   }, []);
 
   const disableCamera = useCallback(async () => {
     mediaStreamRef.current?.getTracks().forEach(t => t.stop());
     mediaStreamRef.current = null;
-    if (videoElRef.current) videoElRef.current.srcObject = null;
+    if (videoElRef.current) {
+      videoElRef.current.srcObject = null;
+    }
     await fetch("/api/webcam/stop", { method: "POST" }).catch(() => {});
-    setSourceMode("simulation");
+    setSourceMode("idle");
     setCameraError(null);
   }, []);
 
@@ -215,7 +209,7 @@ export default function Dashboard({ frame, connected }: Props) {
 
   const stopVideoProcessing = async () => {
     await fetch("/api/video/stop", { method: "POST" });
-    setSourceMode("simulation");
+    setSourceMode("idle");
   };
 
   // ── Stream ────────────────────────────────────────────────────────────────────
@@ -239,48 +233,61 @@ export default function Dashboard({ frame, connected }: Props) {
 
   const stopStream = async () => {
     await fetch("/api/stream/stop", { method: "POST" });
-    setSourceMode("simulation");
+    setSourceMode("idle");
   };
 
   const isVideoProcessing = videoStatus?.mode === "processing";
-  const hasUpload = !!(videoStatus?.filename && videoStatus?.mode !== "simulation");
-  const isStreaming = streamStatus?.active || sourceMode === "stream";
+  const hasUpload = !!(videoStatus?.filename && videoStatus?.mode !== "idle");
+  const isStreaming = streamStatus?.active === true || sourceMode === "stream";
   const modelReady = videoStatus?.model_ready ?? false;
   const modelError = videoStatus?.model_error ?? null;
 
   const metricPills = [
-    { icon: Users, label: "PERSONS", value: stats?.person_count ?? 0, color: "#3b82f6" },
-    { icon: Package, label: "OBJECTS", value: stats?.object_count ?? 0, color: "#f59e0b" },
-    { icon: AlertTriangle, label: "ANOMALIES", value: anomalies.length, color: anomalies.length > 0 ? "#ef4444" : "#10b981" },
-    { icon: Activity, label: "ACTIVE TRACKS", value: tracks.length, color: "#a855f7" },
+    { icon: Users,         label: "PERSONS",      value: stats?.person_count ?? 0,  color: "#3b82f6" },
+    { icon: Package,       label: "OBJECTS",       value: stats?.object_count ?? 0,  color: "#f59e0b" },
+    { icon: AlertTriangle, label: "ANOMALIES",     value: anomalies.length,          color: anomalies.length > 0 ? "#ef4444" : "#10b981" },
+    { icon: Activity,      label: "ACTIVE TRACKS", value: tracks.length,             color: "#a855f7" },
   ];
 
-  // mode badge displayed in header
   const modeBadge = (() => {
-    if (displayMode === "video") return { label: "VIDEO DETECT · YOLO", color: "#a855f7", icon: Video };
-    if (displayMode === "webcam") return { label: "WEBCAM · LIVE YOLO", color: "#10b981", icon: Camera };
-    if (displayMode === "stream") return { label: "STREAM · LIVE YOLO", color: "#f59e0b", icon: Radio };
-    return { label: "SIMULATION MODE", color: "#475569", icon: Monitor };
+    if (displayMode === "video")  return { label: "VIDEO DETECT · YOLO", color: "#a855f7", icon: Video };
+    if (displayMode === "webcam") return { label: "WEBCAM · LIVE YOLO",  color: "#10b981", icon: Camera };
+    if (displayMode === "stream") return { label: "STREAM · LIVE YOLO",  color: "#f59e0b", icon: Radio };
+    return { label: "AWAITING INPUT",  color: "#475569", icon: Monitor };
   })();
 
   return (
     <div>
-      {/* Header */}
+      {/* ── Hidden file input — always mounted so file picker works ── */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="video/*"
+        style={{ display: "none" }}
+        onChange={e => {
+          const f = e.target.files?.[0];
+          if (f) handleFileUpload(f);
+          // Reset so the same file can be re-selected
+          e.target.value = "";
+        }}
+      />
+
+      {/* ── Header ── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f1f5f9", letterSpacing: -0.5, marginBottom: 4 }}>
             Live Surveillance Dashboard
           </h1>
           <p style={{ color: "#475569", fontSize: 13 }}>
-            {displayMode === "video" && "YOLOv8n + SORT — processing uploaded video"}
+            {displayMode === "video"  && "YOLOv8n + SORT — processing uploaded video"}
             {displayMode === "webcam" && "YOLOv8n + SORT — real-time webcam detection"}
             {displayMode === "stream" && `YOLOv8n + SORT — live stream: ${streamStatus?.url ?? ""}`}
-            {displayMode === "simulation" && "Simulation mode · Switch to webcam, video or stream for real detection"}
+            {(displayMode === "idle" || !displayMode) && "Select a source below — webcam, video upload, or live stream"}
           </p>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {/* Sound */}
+          {/* Sound toggle */}
           <button
             onClick={() => setSoundEnabled(v => !v)}
             style={{
@@ -293,8 +300,10 @@ export default function Dashboard({ frame, connected }: Props) {
             {soundEnabled ? "Sound ON" : "Sound OFF"}
           </button>
 
-          {/* Webcam */}
-          {cameraError && <span style={{ fontSize: 11, color: "#ef4444", maxWidth: 160 }}>{cameraError}</span>}
+          {/* Webcam button */}
+          {cameraError && (
+            <span style={{ fontSize: 11, color: "#ef4444", maxWidth: 160 }}>{cameraError}</span>
+          )}
           <button
             onClick={sourceMode === "webcam" ? disableCamera : enableCamera}
             disabled={isVideoProcessing || isStreaming}
@@ -309,16 +318,13 @@ export default function Dashboard({ frame, connected }: Props) {
             }}
           >
             {sourceMode === "webcam" ? (
-              <>
-                {webcamStatus?.active
-                  ? <><div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981", animation: "pulse-ring 1.4s infinite" }} /> YOLO LIVE</>
-                  : <><Loader size={14} style={{ animation: "spin 1s linear infinite" }} /> YOLO Starting…</>
-                }
-              </>
+              webcamStatus?.active
+                ? <><div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981", animation: "pulse-ring 1.4s infinite" }} /> YOLO LIVE</>
+                : <><Loader size={14} style={{ animation: "spin 1s linear infinite" }} /> YOLO Starting…</>
             ) : <><Camera size={14} /> Live Webcam</>}
           </button>
 
-          {/* Video upload */}
+          {/* Video upload button */}
           <button
             onClick={() => setActivePanel(p => p === "video" ? "none" : "video")}
             style={{
@@ -333,7 +339,7 @@ export default function Dashboard({ frame, connected }: Props) {
             {isVideoProcessing ? "Video Running" : "Upload Video"}
           </button>
 
-          {/* Stream */}
+          {/* Stream button */}
           <button
             onClick={() => setActivePanel(p => p === "stream" ? "none" : "stream")}
             style={{
@@ -391,7 +397,12 @@ export default function Dashboard({ frame, connected }: Props) {
             <div
               onDragOver={e => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
-              onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFileUpload(f); }}
+              onDrop={e => {
+                e.preventDefault();
+                setDragOver(false);
+                const f = e.dataTransfer.files[0];
+                if (f) handleFileUpload(f);
+              }}
               onClick={() => fileInputRef.current?.click()}
               style={{
                 border: `2px dashed ${dragOver ? "#a855f7" : "rgba(168,85,247,0.3)"}`,
@@ -400,21 +411,22 @@ export default function Dashboard({ frame, connected }: Props) {
                 background: dragOver ? "rgba(168,85,247,0.08)" : "transparent", marginBottom: 12,
               }}
             >
-              <Upload size={24} color="#a855f7" style={{ margin: "0 auto 8px" }} />
+              <Upload size={24} color="#a855f7" style={{ margin: "0 auto 8px", display: "block" }} />
               <div style={{ color: "#94a3b8", fontSize: 13 }}>
-                {uploading ? "Uploading…" : (videoStatus?.filename && hasUpload)
-                  ? <><span style={{ color: "#a855f7", fontWeight: 600 }}>{videoStatus.filename}</span> · ready to process</>
-                  : "Drop video here or click to browse"}
+                {uploading
+                  ? "Uploading…"
+                  : (videoStatus?.filename && hasUpload)
+                    ? <><span style={{ color: "#a855f7", fontWeight: 600 }}>{videoStatus.filename}</span> · ready to process</>
+                    : "Drop video here or click to browse"
+                }
               </div>
               <div style={{ fontSize: 11, color: "#334155", marginTop: 4 }}>MP4, AVI, MOV, MKV · max 500 MB</div>
             </div>
           )}
 
-          <input ref={fileInputRef} type="file" accept="video/*" style={{ display: "none" }}
-            onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ""; }}
-          />
-
-          {uploadError && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 10 }}>{uploadError}</div>}
+          {uploadError && (
+            <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 10 }}>{uploadError}</div>
+          )}
 
           {isVideoProcessing && (
             <div style={{ marginBottom: 12 }}>
@@ -431,7 +443,9 @@ export default function Dashboard({ frame, connected }: Props) {
             </div>
           )}
 
-          {videoStatus?.error && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 10 }}>Error: {videoStatus.error}</div>}
+          {videoStatus?.error && (
+            <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 10 }}>Error: {videoStatus.error}</div>
+          )}
 
           <div style={{ display: "flex", gap: 10 }}>
             {!isVideoProcessing && hasUpload && (
@@ -472,7 +486,6 @@ export default function Dashboard({ frame, connected }: Props) {
             </button>
           </div>
 
-          {/* Model status */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 11 }}>
             {streamStatus?.model_ready ? (
               <><CheckCircle size={13} color="#10b981" /><span style={{ color: "#10b981" }}>YOLOv8n ready</span></>
@@ -573,7 +586,7 @@ export default function Dashboard({ frame, connected }: Props) {
             <SimulationCanvas
               tracks={tracks}
               anomalies={anomalies}
-              cameraMode={sourceMode === "webcam" ? "webcam" : "simulation"}
+              cameraMode={sourceMode === "webcam" ? "webcam" : "idle"}
               videoRef={videoElRef}
               sourceMode={displayMode}
             />

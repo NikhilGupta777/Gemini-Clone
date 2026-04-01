@@ -1,5 +1,5 @@
 import { Route, Switch } from "wouter";
-import { useSimulation } from "./hooks/useSimulation";
+import { DetectionProvider, useDetection } from "./context/DetectionContext";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import AlertHistory from "./pages/AlertHistory";
@@ -7,21 +7,19 @@ import Settings from "./pages/Settings";
 
 function getThreatLevel(anomalyCount: number, types: string[]): "secure" | "warning" | "critical" {
   if (anomalyCount === 0) return "secure";
-  if (types.includes("running")) return "critical";
-  if (types.includes("unattended_object")) return "critical";
+  if (types.includes("running") || types.includes("unattended_object")) return "critical";
   return "warning";
 }
 
-export default function App() {
-  const { frame, connected } = useSimulation();
-
+function AppShell() {
+  const { frame, connected } = useDetection();
   const anomalyTypes = frame?.anomalies.map((a) => a.type) ?? [];
   const threatLevel = getThreatLevel(frame?.anomalies.length ?? 0, anomalyTypes);
 
   return (
     <Layout connected={connected} threatLevel={threatLevel}>
       <Switch>
-        <Route path="/" component={() => <Dashboard frame={frame} connected={connected} />} />
+        <Route path="/" component={Dashboard} />
         <Route path="/history" component={AlertHistory} />
         <Route path="/settings" component={Settings} />
         <Route>
@@ -29,5 +27,13 @@ export default function App() {
         </Route>
       </Switch>
     </Layout>
+  );
+}
+
+export default function App() {
+  return (
+    <DetectionProvider>
+      <AppShell />
+    </DetectionProvider>
   );
 }

@@ -12,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from backend.anomaly import AnomalyDetector
-from backend.simulation import SimulationEngine
 from backend.config import (
     OVERCROWDING_THRESHOLD, RUNNING_SPEED_THRESHOLD,
     UNATTENDED_OBJECT_TIME, STATIONARY_THRESHOLD, COCO_CLASSES,
@@ -21,8 +20,6 @@ from backend.detector import _download_model, is_model_ready, get_model_error
 
 # ─── Global State ─────────────────────────────────────────────────────────────
 
-simulation = SimulationEngine()
-sim_anomaly_detector = AnomalyDetector()
 alert_history: deque = deque(maxlen=500)
 connected_clients: list[WebSocket] = []
 
@@ -48,15 +45,15 @@ _ALERT_COOLDOWN_SECS = 5.0
 _alert_id_counter = 0
 
 # ─── Processing mode state ────────────────────────────────────────────────────
-# Modes: "simulation" | "video" | "webcam" | "stream"
+# Modes: "idle" | "video" | "webcam" | "stream"
 
 VIDEO_UPLOAD_PATH = "/tmp/crowdlens_upload.mp4"
-_processing_mode = "simulation"
+_processing_mode = "idle"
 _active_task: asyncio.Task | None = None
 _video_anomaly_detector = AnomalyDetector()
 
 video_status = {
-    "mode": "simulation",
+    "mode": "idle",
     "filename": None,
     "progress": 0.0,
     "total_frames": 0,
@@ -197,27 +194,6 @@ def _finalize_tracks(tracks: list, anomalies: list) -> list:
     for t in tracks:
         t["running"] = t["id"] in running_ids
     return tracks
-
-
-# ─── Simulation loop ──────────────────────────────────────────────────────────
-
-async def simulation_loop():
-    interval = 0.1
-    while True:
-        start = asyncio.get_event_loop().time()
-        if connected_clients and _processing_mode == "simulation":
-            _apply_config()
-            tracks = simulation.tick()
-            now = time.time()
-            anomalies = sim_anomaly_detector.update(tracks, now)
-            for t in tracks:
-                cx = (t["x1"] + t["x2"]) / 2
-                t["zone"] = _get_zone(cx)
-            payload = build_frame_payload(tracks, anomalies, now)
-            await _broadcast(json.dumps(payload))
-
-        elapsed = asyncio.get_event_loop().time() - start
-        await asyncio.sleep(max(0, interval - elapsed))
 
 
 # ─── Video processing loop ────────────────────────────────────────────────────
@@ -404,14 +380,14 @@ async def webcam_processing_loop():
             try:
                 jpeg_bytes = await asyncio.wait_for(_cam_frame_queue.get(), timeout=5.0)
             except asyncio.TimeoutError:
-                if _processing_mode != "webcam":
-                    break
-                continue
+                # Keep waiting if still in webcam mode
+                if _processing_mode == "webcam":
+                    continue
+                break
 
             if _processing_mode != "webcam":
                 break
 
-            # Decode JPEG bytes → numpy frame
             arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
             frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             if frame is None:
@@ -444,17 +420,8 @@ async def webcam_processing_loop():
 async def lifespan(app: FastAPI):
     thread = threading.Thread(target=_download_model, daemon=True)
     thread.start()
-
-    sim_task = asyncio.create_task(simulation_loop())
     yield
-
-    sim_task.cancel()
     _cancel_active()
-
-    try:
-        await sim_task
-    except asyncio.CancelledError:
-        pass
 
 
 # ─── App ──────────────────────────────────────────────────────────────────────
@@ -556,8 +523,8 @@ async def start_video():
 async def stop_video():
     global _processing_mode
     _cancel_active()
-    _processing_mode = "simulation"
-    video_status["mode"] = "simulation"
+    _processing_mode = "idle"
+    video_status["mode"] = "ready"
     video_status["progress"] = 0
     return {"success": True}
 
@@ -597,7 +564,7 @@ async def start_stream(body: StreamRequest):
 async def stop_stream():
     global _processing_mode
     _cancel_active()
-    _processing_mode = "simulation"
+    _processing_mode = "idle"
     stream_status["active"] = False
     stream_status["url"] = None
     return {"success": True}
@@ -632,7 +599,7 @@ async def start_webcam():
     _cancel_active()
     _processing_mode = "webcam"
     webcam_status["error"] = None
-    webcam_status["active"] = False  # will be set True when loop starts
+    webcam_status["active"] = False  # set True when loop starts
     # Drain old frames
     while not _cam_frame_queue.empty():
         try:
@@ -647,7 +614,7 @@ async def start_webcam():
 async def stop_webcam():
     global _processing_mode
     _cancel_active()
-    _processing_mode = "simulation"
+    _processing_mode = "idle"
     webcam_status["active"] = False
     return {"success": True}
 
@@ -680,6 +647,6 @@ async def webcam_ws(websocket: WebSocket):
                 try:
                     _cam_frame_queue.put_nowait(data)
                 except asyncio.QueueFull:
-                    pass  # Drop frame if queue is full — processing can't keep up
+                    pass  # Drop frame if queue is full
     except WebSocketDisconnect:
         print("[ws/cam] Webcam client disconnected")

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, RefObject } from "react";
 import { Track, Anomaly } from "../hooks/useSimulation";
 
 const W = 1280;
@@ -34,18 +34,18 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-type SourceMode = "simulation" | "video" | "webcam" | "stream";
+type SourceMode = "idle" | "video" | "webcam" | "stream";
 
 interface Props {
   tracks: Track[];
   anomalies: Anomaly[];
-  cameraMode: "simulation" | "webcam";
-  videoRef: React.RefObject<HTMLVideoElement | null>;
+  cameraMode: "webcam" | "idle";
+  videoRef: RefObject<HTMLVideoElement | null>;
   sourceMode?: SourceMode;
 }
 
 export default function SimulationCanvas({
-  tracks, anomalies, cameraMode, videoRef, sourceMode = "simulation",
+  tracks, anomalies, cameraMode, videoRef, sourceMode = "idle",
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -75,12 +75,11 @@ export default function SimulationCanvas({
       const hasLiveVideo = cameraMode === "webcam" && vid && vid.readyState >= 2;
 
       if (hasLiveVideo) {
-        // Real webcam: draw actual camera frame + slight dark overlay
         ctx.drawImage(vid, 0, 0, W, H);
         ctx.fillStyle = "rgba(6,10,18,0.25)";
         ctx.fillRect(0, 0, W, H);
       } else if (sourceMode === "video" || sourceMode === "stream") {
-        // Server processes video/stream: show dark bg + purple grid (server sends tracks)
+        // Server-processed source — dark bg with purple grid
         const bg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 700);
         bg.addColorStop(0, "#0a0f1f");
         bg.addColorStop(1, "#05080f");
@@ -91,35 +90,30 @@ export default function SimulationCanvas({
         for (let x = 80; x < W; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
         for (let y = 80; y < H; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
       } else {
-        // Simulation: dark bg with labelled zone overlays
+        // Idle — dark bg with subtle grid and "waiting" message
         const bg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 700);
-        bg.addColorStop(0, "#0d1525");
-        bg.addColorStop(1, "#080c18");
+        bg.addColorStop(0, "#080e1c");
+        bg.addColorStop(1, "#040810");
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, W, H);
-        ctx.strokeStyle = "rgba(59,130,246,0.07)";
+
+        ctx.strokeStyle = "rgba(59,130,246,0.04)";
         ctx.lineWidth = 1;
         for (let x = 80; x < W; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
         for (let y = 80; y < H; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
 
-        const zones = [
-          { label: "ZONE A · ENTRANCE", x: 0, w: W / 3, color: "rgba(59,130,246,0.07)", borderColor: "rgba(59,130,246,0.15)" },
-          { label: "ZONE B · CORRIDOR", x: W / 3, w: W / 3, color: "rgba(16,185,129,0.05)", borderColor: "rgba(16,185,129,0.12)" },
-          { label: "ZONE C · EXIT", x: 2 * W / 3, w: W / 3, color: "rgba(168,85,247,0.06)", borderColor: "rgba(168,85,247,0.12)" },
-        ];
-        ctx.setLineDash([]);
-        for (const z of zones) {
-          ctx.fillStyle = z.color;
-          ctx.fillRect(z.x, 0, z.w, H);
-          ctx.strokeStyle = z.borderColor;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([6, 6]);
-          ctx.beginPath(); ctx.moveTo(z.x + z.w, 0); ctx.lineTo(z.x + z.w, H); ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = z.borderColor;
-          ctx.font = "700 9px monospace";
-          ctx.fillText(z.label, z.x + 12, 20);
-        }
+        // Centre idle message
+        const pulse = 0.55 + 0.45 * Math.sin(t / 1200);
+        ctx.globalAlpha = pulse;
+        ctx.font = "700 13px monospace";
+        ctx.fillStyle = "#1e3a5f";
+        const msg = "SELECT A SOURCE — WEBCAM · UPLOAD · STREAM";
+        ctx.fillText(msg, W / 2 - ctx.measureText(msg).width / 2, H / 2);
+        ctx.font = "500 11px monospace";
+        ctx.fillStyle = "#0f1f3d";
+        const sub = "YOLOv8n + SORT  ·  Real-time anomaly detection engine";
+        ctx.fillText(sub, W / 2 - ctx.measureText(sub).width / 2, H / 2 + 22);
+        ctx.globalAlpha = 1;
       }
       ctx.setLineDash([]);
 
@@ -137,11 +131,9 @@ export default function SimulationCanvas({
         else color = "#f59e0b";
 
         if (isAnomaly || running) { ctx.shadowBlur = 18; ctx.shadowColor = color; }
-
         drawCornerMarker(ctx, x1, y1, x2, y2, color);
         ctx.shadowBlur = 0;
 
-        // Label
         const confStr = confidence !== undefined ? ` ${(confidence * 100).toFixed(0)}%` : "";
         const labelText = `#${id} ${class_name}${confStr}${running ? " RUNNING" : ""}`;
         ctx.font = "600 10px monospace";
@@ -154,7 +146,6 @@ export default function SimulationCanvas({
         ctx.fillStyle = "#fff";
         ctx.fillText(labelText, lx, ly + 11);
 
-        // Running trail
         if (running) {
           const cx = (x1 + x2) / 2;
           const cy = (y1 + y2) / 2;
@@ -198,9 +189,7 @@ export default function SimulationCanvas({
           ctx.strokeStyle = `rgba(239,68,68,${0.4 + 0.3 * pulse})`;
           ctx.lineWidth = 2;
           ctx.setLineDash([4, 4]);
-          if (anomaly.position) {
-            ctx.beginPath(); ctx.arc(ax, ay, 50, 0, 2 * Math.PI); ctx.stroke();
-          }
+          ctx.beginPath(); ctx.arc(ax, ay, 50, 0, 2 * Math.PI); ctx.stroke();
           ctx.setLineDash([]);
         }
       }
@@ -208,20 +197,19 @@ export default function SimulationCanvas({
       // ── HUD ────────────────────────────────────────────────────────────────
 
       const modeLabel = (() => {
-        if (sourceMode === "video") return "YOLO · VIDEO";
+        if (sourceMode === "video")  return "YOLO · VIDEO";
         if (sourceMode === "webcam") return "YOLO · WEBCAM";
         if (sourceMode === "stream") return "YOLO · STREAM";
-        return "SIMULATION";
+        return "STANDBY";
       })();
 
       const modeColor = (() => {
-        if (sourceMode === "video") return "#a855f7";
+        if (sourceMode === "video")  return "#a855f7";
         if (sourceMode === "webcam") return "#10b981";
         if (sourceMode === "stream") return "#f59e0b";
-        return "#475569";
+        return "#1e3a5f";
       })();
 
-      // Bottom-left: time + mode
       ctx.fillStyle = "rgba(0,0,0,0.6)";
       roundRect(ctx, 12, H - 36, 220, 26, 6);
       ctx.fill();
@@ -229,22 +217,12 @@ export default function SimulationCanvas({
       ctx.font = "11px monospace";
       ctx.fillText(`${new Date().toLocaleTimeString("en-IN")}  ·  ${modeLabel}`, 20, H - 17);
 
-      // Bottom-right: live badge
-      const isReal = sourceMode !== "simulation";
-      const badgeText = isReal ? "⚡ LIVE DETECT" : "◉ SIM MODE";
+      const isReal = sourceMode !== "idle";
+      const badgeText = isReal ? "⚡ LIVE DETECT" : "◉ STANDBY";
       const badgeW = 126;
       ctx.fillStyle = "rgba(0,0,0,0.6)";
       roundRect(ctx, W - badgeW - 12, H - 36, badgeW, 26, 6);
       ctx.fill();
-
-      if (!isReal) {
-        const recPulse = Math.sin(t / 700) > 0;
-        if (recPulse) {
-          ctx.fillStyle = "#334155";
-          ctx.beginPath(); ctx.arc(W - badgeW - 2, H - 23, 5, 0, 2 * Math.PI); ctx.fill();
-        }
-      }
-
       ctx.fillStyle = modeColor;
       ctx.font = "700 10px monospace";
       ctx.fillText(badgeText, W - badgeW, H - 17);

@@ -35,7 +35,7 @@ export interface FrameData {
   anomalies: Anomaly[];
   stats: SimStats;
   timestamp: number;
-  mode?: "simulation" | "video" | "webcam" | "stream";
+  mode?: "idle" | "video" | "webcam" | "stream";
 }
 
 function getWsUrl() {
