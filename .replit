@@ -30,13 +30,13 @@ args = "Python Backend"
 name = "Python Backend"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload"
-waitForPort = 8080
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "uv run uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload"
+waitForPort = 8080
 
 [agent]
 stack = "PNPM_WORKSPACE"

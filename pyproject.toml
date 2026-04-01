@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "python-multipart>=0.0.9",
     "scipy>=1.11.0",
+    "ultralytics>=8.0.0",
     "uvicorn[standard]>=0.29.0",
     "websockets>=12.0",
 ]
@@ -1080,7 +1081,6 @@ u8darts = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 uhg = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 uitestrunner-syberos = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 ultimate-rvc = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
-ultralytics = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 ultralytics-thop = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 unav = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 unbabel-comet = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
