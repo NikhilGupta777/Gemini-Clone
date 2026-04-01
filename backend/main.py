@@ -183,14 +183,14 @@ async def video_processing_loop():
     video_status["error"] = None
 
     try:
-        from backend.detector import YOLOv4TinyDetector
+        from backend.detector import YOLOv8Detector
         from backend.sort_tracker import Sort
     except Exception as e:
         video_status["error"] = f"Failed to load detector: {e}"
         return
 
     try:
-        detector = YOLOv4TinyDetector()
+        detector = YOLOv8Detector()
         tracker = Sort(max_age=3, min_hits=2, iou_threshold=0.3)
         _video_anomaly_detector = AnomalyDetector()
     except Exception as e:
@@ -224,7 +224,7 @@ async def video_processing_loop():
             # Resize to match canvas dimensions
             frame = cv2.resize(frame, (1280, 720))
 
-            # Run YOLOv4-tiny detection
+            # Run YOLOv8n detection (ultralytics)
             detections = detector.detect(frame)
 
             # Run SORT tracking
@@ -376,7 +376,7 @@ async def start_video():
     if not os.path.exists(VIDEO_UPLOAD_PATH):
         raise HTTPException(400, "No video uploaded yet")
     if not is_model_ready():
-        raise HTTPException(503, "YOLOv4-tiny model is still loading, please wait")
+        raise HTTPException(503, "YOLOv8n model is still loading, please wait")
 
     if _video_task and not _video_task.done():
         _video_task.cancel()

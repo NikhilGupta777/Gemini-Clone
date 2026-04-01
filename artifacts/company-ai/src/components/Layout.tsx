@@ -163,7 +163,7 @@ export default function Layout({ children, connected, threatLevel }: Props) {
               flexShrink: 0,
             }} />
             <span style={{ fontSize: 10, color: "#475569" }}>
-              {connected ? "YOLOv4-tiny · SORT Tracking" : "Waiting for backend…"}
+              {connected ? "YOLOv8n · SORT Tracking" : "Waiting for backend…"}
             </span>
           </div>
         </div>

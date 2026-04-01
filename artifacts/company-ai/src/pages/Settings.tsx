@@ -291,7 +291,7 @@ export default function Settings() {
           ))}
         </div>
         <div style={{ fontSize: 11, color: "#1e3a5f", marginTop: 14 }}>
-          These COCO class IDs are tracked by the YOLOv4-tiny detection pipeline (OpenCV DNN + SORT). Objects
+          These COCO class IDs are tracked by the YOLOv8n detection pipeline (ultralytics + SORT). Objects
           that remain stationary beyond the configured time trigger unattended object alerts.
         </div>
       </div>
