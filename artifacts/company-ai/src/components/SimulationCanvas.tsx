@@ -139,7 +139,7 @@ export default function SimulationCanvas({ tracks, anomalies, cameraMode, videoR
 
         drawCornerMarker(ctx, tr.x1, tr.y1, tr.x2, tr.y2, color, isAnomalous ? 16 : 12);
 
-        // Confidence — real from YOLOv8 or simulated fallback
+        // Confidence — real from YOLOv4-tiny, or simulated fallback
         const conf = tr.confidence !== undefined
           ? tr.confidence
           : 0.78 + (tr.id % 17) * 0.012;

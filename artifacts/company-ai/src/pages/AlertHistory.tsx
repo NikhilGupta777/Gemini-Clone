@@ -76,12 +76,16 @@ function buildChartData(alerts: AlertRecord[]): ChartBucket[] {
     if (now - r.timestamp > range) continue;
     const t = Math.floor(r.timestamp / 60) * 60;
     const label = new Date(t * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-    if (buckets[label] !== undefined) {
-      buckets[label][r.anomaly.type] = (buckets[label][r.anomaly.type] ?? 0) + 1;
+    const bucket = buckets[label];
+    if (bucket) {
+      const type = r.anomaly.type as keyof Omit<ChartBucket, "time">;
+      if (type === "running" || type === "unattended_object" || type === "overcrowding") {
+        bucket[type] = (bucket[type] ?? 0) + 1;
+      }
     }
   }
 
-  return Object.entries(buckets).map(([time, counts]) => ({ time, ...counts }));
+  return Object.values(buckets);
 }
 
 export default function AlertHistory() {

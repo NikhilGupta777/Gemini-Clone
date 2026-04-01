@@ -146,5 +146,3 @@ class YOLOv4TinyDetector:
         return results
 
 
-# Alias so main.py import stays the same
-YOLOv8Detector = YOLOv4TinyDetector
