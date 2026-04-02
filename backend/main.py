@@ -3,6 +3,8 @@ import base64
 import json
 import math
 import os
+import queue
+import tempfile
 import time
 import threading
 from collections import deque
@@ -11,13 +13,21 @@ from contextlib import asynccontextmanager
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
 from backend.anomaly import AnomalyDetector
 from backend.config import (
     OVERCROWDING_THRESHOLD, RUNNING_SPEED_THRESHOLD,
     UNATTENDED_OBJECT_TIME, STATIONARY_THRESHOLD, COCO_CLASSES,
+    UNATTENDED_OWNER_PROXIMITY_PX, UNATTENDED_OWNER_GRACE_TIME,
+    FALL_ASPECT_RATIO_THRESHOLD, FALL_PERSISTENCE_TIME,
+    RESTRICTED_ZONE_ENABLED, RESTRICTED_ZONE_MIN_DWELL,
+    RESTRICTED_ZONES, FRAME_WIDTH, FRAME_HEIGHT,
+    STREAM_FRAME_WIDTH, STREAM_FRAME_HEIGHT,
+    STREAM_TARGET_FPS, STREAM_DETECTION_CONFIDENCE,
+    VIDEO_DETECTION_CONFIDENCE, WEBCAM_DETECTION_CONFIDENCE,
+    TRACKER_MIN_HITS,
 )
 from backend.detector import _download_model, is_model_ready, get_model_error
 
@@ -31,6 +41,12 @@ current_config = {
     "running_speed_threshold": RUNNING_SPEED_THRESHOLD,
     "unattended_object_time": UNATTENDED_OBJECT_TIME,
     "stationary_threshold": STATIONARY_THRESHOLD,
+    "unattended_owner_proximity_px": UNATTENDED_OWNER_PROXIMITY_PX,
+    "unattended_owner_grace_time": UNATTENDED_OWNER_GRACE_TIME,
+    "fall_aspect_ratio_threshold": FALL_ASPECT_RATIO_THRESHOLD,
+    "fall_persistence_time": FALL_PERSISTENCE_TIME,
+    "restricted_zone_enabled": RESTRICTED_ZONE_ENABLED,
+    "restricted_zone_min_dwell": RESTRICTED_ZONE_MIN_DWELL,
 }
 
 stats_snapshot = {
@@ -46,11 +62,17 @@ _frame_times: deque = deque(maxlen=30)
 _alert_cooldowns: dict = {}
 _ALERT_COOLDOWN_SECS = 5.0
 _alert_id_counter = 0
+_archive_dir = os.path.join(os.path.dirname(__file__), "archive")
+_archive_retention_seconds = 7 * 24 * 60 * 60
+_last_archive_cleanup = 0.0
+_latest_frame_for_snapshot = None
+
+os.makedirs(_archive_dir, exist_ok=True)
 
 # ─── Processing mode state ────────────────────────────────────────────────────
 # Modes: "idle" | "video" | "webcam" | "stream"
 
-VIDEO_UPLOAD_PATH = "/tmp/crowdlens_upload.mp4"
+VIDEO_UPLOAD_PATH = os.path.join(tempfile.gettempdir(), "crowdlens_upload.mp4")
 _processing_mode = "idle"
 _active_task: asyncio.Task | None = None
 _video_anomaly_detector = AnomalyDetector()
@@ -83,11 +105,10 @@ _cam_frame_queue: asyncio.Queue = asyncio.Queue(maxsize=4)
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _get_zone(cx: float) -> str:
-    from backend.config import FRAME_WIDTH
-    if cx < FRAME_WIDTH / 3:
+def _get_zone(cx: float, frame_width: int) -> str:
+    if cx < frame_width / 3:
         return "A"
-    if cx < 2 * FRAME_WIDTH / 3:
+    if cx < 2 * frame_width / 3:
         return "B"
     return "C"
 
@@ -100,7 +121,68 @@ def _should_record_alert(anomaly: dict, now: float) -> bool:
     return False
 
 
-def build_frame_payload(tracks: list, anomalies: list, now: float, mode: str | None = None) -> dict:
+def _reset_fps_window():
+    """Reset rolling FPS window and live counters when switching source modes."""
+    _frame_times.clear()
+    stats_snapshot.update({
+        "person_count": 0,
+        "object_count": 0,
+        "anomaly_count": 0,
+        "fps": 0,
+        "uptime_seconds": round(time.time() - _start_time),
+    })
+
+
+def _cleanup_archive(now: float):
+    """Delete old snapshot files to keep archive bounded for local demo use."""
+    global _last_archive_cleanup
+    if now - _last_archive_cleanup < 3600:
+        return
+    _last_archive_cleanup = now
+
+    try:
+        for fn in os.listdir(_archive_dir):
+            p = os.path.join(_archive_dir, fn)
+            try:
+                if os.path.isfile(p) and now - os.path.getmtime(p) > _archive_retention_seconds:
+                    os.unlink(p)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+def _save_archive_snapshot(frame, now: float) -> str | None:
+    """Persist a JPEG snapshot for incident evidence and return a fetchable URL."""
+    try:
+        import cv2
+        _cleanup_archive(now)
+        ts = time.strftime("%Y%m%d_%H%M%S", time.localtime(now))
+        ms = int((now - int(now)) * 1000)
+        filename = f"alert_{ts}_{ms:03d}.jpg"
+        path = os.path.join(_archive_dir, filename)
+        # Keep evidence readable while controlling disk footprint.
+        snapshot = frame
+        h, w = snapshot.shape[:2]
+        if w > 1280:
+            scale = 1280 / max(1, w)
+            snapshot = cv2.resize(snapshot, (1280, int(h * scale)))
+        ok = cv2.imwrite(path, snapshot, [cv2.IMWRITE_JPEG_QUALITY, 82])
+        if not ok:
+            return None
+        return f"/api/archive/image/{filename}"
+    except Exception:
+        return None
+
+
+def build_frame_payload(
+    tracks: list,
+    anomalies: list,
+    now: float,
+    mode: str | None = None,
+    frame_for_archive=None,
+) -> dict:
+    global _latest_frame_for_snapshot
     person_count = sum(1 for t in tracks if t["class_id"] == 0)
     object_count = sum(1 for t in tracks if t["class_id"] != 0)
 
@@ -128,8 +210,14 @@ def build_frame_payload(tracks: list, anomalies: list, now: float, mode: str | N
 
     global _alert_id_counter
     effective_mode = mode or _processing_mode
-    for a in serializable_anomalies:
-        if _should_record_alert(a, now):
+    recordable_anomalies = [a for a in serializable_anomalies if _should_record_alert(a, now)]
+    if frame_for_archive is not None:
+        _latest_frame_for_snapshot = frame_for_archive.copy()
+    snapshot_url = None
+    if recordable_anomalies and frame_for_archive is not None:
+        snapshot_url = _save_archive_snapshot(frame_for_archive, now)
+
+    for a in recordable_anomalies:
             _alert_id_counter += 1
             alert_history.append({
                 "id": _alert_id_counter,
@@ -137,6 +225,7 @@ def build_frame_payload(tracks: list, anomalies: list, now: float, mode: str | N
                 "timestamp": now,
                 "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
                 "source": effective_mode,
+                "snapshot_url": snapshot_url,
             })
 
     return {
@@ -168,14 +257,21 @@ async def _broadcast(message: str):
             connected_clients.remove(d)
 
 
-def _cancel_active():
+async def _cancel_active():
     global _active_task
-    if _active_task and not _active_task.done():
-        _active_task.cancel()
-        _active_task = None
+    task = _active_task
+    _active_task = None
+    if task and not task.done():
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=2.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+        except Exception:
+            pass
 
 
-def _build_tracks_from_yolo(raw_tracks: list) -> list:
+def _build_tracks_from_yolo(raw_tracks: list, frame_width: int, frame_height: int) -> list:
     tracks = []
     for t in raw_tracks:
         x1, y1, x2, y2 = [max(0, int(v)) for v in t["bbox"]]
@@ -187,7 +283,10 @@ def _build_tracks_from_yolo(raw_tracks: list) -> list:
             "class_name": COCO_CLASSES.get(t["class_id"], "object"),
             "running": False,
             "confidence": round(t.get("confidence", 0), 2),
-            "zone": _get_zone(cx),
+            "zone": _get_zone(cx, frame_width),
+            "hit_streak": int(t.get("hit_streak", 0)),
+            "frame_width": frame_width,
+            "frame_height": frame_height,
         })
     return tracks
 
@@ -226,7 +325,7 @@ async def video_processing_loop():
 
     try:
         detector = YOLOv8Detector()
-        tracker = Sort(max_age=3, min_hits=2, iou_threshold=0.3)
+        tracker = Sort(max_age=6, min_hits=TRACKER_MIN_HITS, iou_threshold=0.3)
         _video_anomaly_detector = AnomalyDetector()
     except Exception as e:
         video_status["error"] = f"Detector init failed: {e}"
@@ -256,21 +355,23 @@ async def video_processing_loop():
             video_status["progress"] = round((frame_num / total * 100), 1) if total > 0 else 0
 
             frame = cv2.resize(frame, (1280, 720))
-            detections = detector.detect(frame)
+            detections = detector.detect(frame, conf_override=VIDEO_DETECTION_CONFIDENCE)
             raw_tracks = tracker.update(detections)
 
             now = time.time()
-            _apply_config()
-            tracks = _build_tracks_from_yolo(raw_tracks)
+            tracks = _build_tracks_from_yolo(raw_tracks, 1280, 720)
             anomalies = _video_anomaly_detector.update(tracks, now)
             tracks = _finalize_tracks(tracks, anomalies)
 
-            payload = build_frame_payload(tracks, anomalies, now, "video")
+            payload = build_frame_payload(
+                tracks, anomalies, now, "video", frame_for_archive=frame
+            )
             payload["frame_jpeg"] = _encode_preview(frame)
             if connected_clients:
                 await _broadcast(json.dumps(payload))
 
-            await asyncio.sleep(0.04)
+            # Do not throttle prerecorded video processing; this avoids slow-motion playback.
+            await asyncio.sleep(0)
 
     except asyncio.CancelledError:
         pass
@@ -291,10 +392,11 @@ async def stream_processing_loop(url: str):
     """
     global _video_anomaly_detector
     import subprocess
+    from urllib.parse import urlsplit
+    from urllib.request import Request, urlopen
 
-    # Use 640x360 so raw frames are 4× smaller (691 KB vs 2.7 MB).
-    # YOLO internally resizes to 640px anyway, so there's no detection quality loss.
-    W, H = 640, 360
+    # Stream decode/render dimensions (tuned for real-time laptop inference).
+    W, H = STREAM_FRAME_WIDTH, STREAM_FRAME_HEIGHT
     FRAME_BYTES = W * H * 3
 
     stream_status["error"] = None
@@ -310,32 +412,92 @@ async def stream_processing_loop(url: str):
 
     try:
         detector = YOLOv8Detector()
-        tracker = Sort(max_age=5, min_hits=2, iou_threshold=0.3)
+        tracker = Sort(max_age=8, min_hits=TRACKER_MIN_HITS, iou_threshold=0.3)
         _video_anomaly_detector = AnomalyDetector()
     except Exception as e:
         stream_status["error"] = f"Detector init failed: {e}"
         stream_status["active"] = False
         return
 
-    import tempfile, os as _os
-
     # Write FFmpeg stderr to a temp file to avoid pipe deadlock
-    # (stderr fills the 64 KB pipe buffer → FFmpeg blocks → stdout stalls)
+    # (stderr fills the pipe buffer -> FFmpeg blocks -> stdout stalls).
     _stderr_path = tempfile.mktemp(suffix=".ffmpeg_err.txt")
+    downloaded_file_path: str | None = None
+    source_input = url
+    tried_http_file_fallback = False
 
-    # Target processing rate: YOLO on CPU manages ~8 fps realistically.
-    # Capping FFmpeg output at this rate prevents frame pile-up that causes
-    # the "slow motion" effect (buffer fills faster than YOLO can drain it).
-    STREAM_FPS = 8
+    # Target output rate from ffmpeg. Keep this conservative on CPU.
+    STREAM_FPS = STREAM_TARGET_FPS
+    STREAM_CONFIDENCE = max(0.01, min(0.99, STREAM_DETECTION_CONFIDENCE))
+    FIRST_FRAME_TIMEOUT_SECS = 15
+    REMOTE_FILE_MAX_BYTES = 750 * 1024 * 1024
+    REMOTE_FILE_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
+
+    def _is_http_file_source(u: str) -> bool:
+        parsed = urlsplit(u)
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return False
+        p = parsed.path.lower()
+        return any(p.endswith(ext) for ext in REMOTE_FILE_EXTENSIONS)
+
+    def _download_http_file(u: str) -> str:
+        parsed = urlsplit(u)
+        suffix = os.path.splitext(parsed.path)[1] or ".mp4"
+        tmp_path = tempfile.mktemp(prefix="crowdlens_stream_", suffix=suffix)
+        req = Request(
+            u,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36"
+                ),
+                "Accept": "*/*",
+            },
+        )
+        total = 0
+        with urlopen(req, timeout=30) as resp, open(tmp_path, "wb") as out:
+            while True:
+                chunk = resp.read(256 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > REMOTE_FILE_MAX_BYTES:
+                    raise RuntimeError(
+                        "Remote file is too large (max 750 MB for URL file fallback)"
+                    )
+                out.write(chunk)
+        if total == 0:
+            raise RuntimeError("Remote URL returned an empty file")
+        return tmp_path
 
     def _build_cmd() -> list[str]:
         cmd = ["ffmpeg", "-y", "-loglevel", "error"]
-        if url.lower().startswith("rtsp://"):
-            cmd += ["-rtsp_transport", "tcp"]
+        if source_input.lower().startswith("rtsp://"):
+            # RTSP sources can hang and buffer deeply; use low-latency settings.
+            cmd += [
+                "-fflags", "nobuffer",
+                "-flags", "low_delay",
+                "-analyzeduration", "0",
+                "-probesize", "32",
+                "-rtsp_transport", "tcp",
+                "-timeout", "10000000",
+                "-rw_timeout", "10000000",
+            ]
+        elif source_input.lower().startswith(("http://", "https://")):
+            cmd += [
+                "-user_agent", "CrowdLens/1.0 ffmpeg",
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_on_network_error", "1",
+                "-reconnect_at_eof", "1",
+                "-reconnect_delay_max", "2",
+                "-fflags", "nobuffer",
+            ]
         cmd += [
-            "-i", url,
+            "-i", source_input,
             "-f", "rawvideo",
             "-pix_fmt", "bgr24",
+            "-vsync", "drop",
             "-vf", f"scale={W}:{H},fps={STREAM_FPS}",
             "-",
         ]
@@ -344,8 +506,7 @@ async def stream_processing_loop(url: str):
     def _start_proc():
         stderr_fh = open(_stderr_path, "wb")
         # bufsize=-1 (default) wraps stdout in BufferedReader so that
-        # read(n) returns EXACTLY n bytes — raw FileIO only returns
-        # whatever is available in a single syscall, causing premature EOF.
+        # read(n) returns exactly n bytes.
         return subprocess.Popen(
             _build_cmd(),
             stdout=subprocess.PIPE,
@@ -369,62 +530,165 @@ async def stream_processing_loop(url: str):
         except Exception:
             return ""
 
+    def _start_reader(process):
+        frame_q: queue.Queue = queue.Queue(maxsize=1)
+        stop_evt = threading.Event()
+        state = {"eof": False}
+
+        def _reader():
+            while not stop_evt.is_set():
+                raw = _read_exactly(process.stdout, FRAME_BYTES)
+                if len(raw) < FRAME_BYTES:
+                    state["eof"] = True
+                    break
+                # Keep only the latest frame so inference does not drift behind live time.
+                try:
+                    frame_q.put_nowait(raw)
+                except queue.Full:
+                    try:
+                        frame_q.get_nowait()
+                    except queue.Empty:
+                        pass
+                    try:
+                        frame_q.put_nowait(raw)
+                    except queue.Full:
+                        pass
+
+        thread = threading.Thread(target=_reader, daemon=True)
+        thread.start()
+        return frame_q, stop_evt, thread, state
+
+    def _stop_reader(stop_evt, thread_obj):
+        if stop_evt is not None:
+            stop_evt.set()
+        if thread_obj is not None and thread_obj.is_alive():
+            thread_obj.join(timeout=1.0)
+
     loop = asyncio.get_event_loop()
     proc = None
+    frame_q = None
+    reader_stop = None
+    reader_thread = None
+    reader_state = {"eof": False}
 
     try:
         proc = await loop.run_in_executor(None, _start_proc)
-        print(f"[stream] FFmpeg opened: {url}")
-        frames_read = 0
+        frame_q, reader_stop, reader_thread, reader_state = _start_reader(proc)
+        print(f"[stream] FFmpeg opened: {source_input}")
+        frames_processed = 0
 
         while True:
-            raw = await loop.run_in_executor(None, _read_exactly, proc.stdout, FRAME_BYTES)
+            timeout_secs = FIRST_FRAME_TIMEOUT_SECS if frames_processed == 0 else 30
+            raw = None
+            try:
+                raw = await loop.run_in_executor(None, frame_q.get, True, timeout_secs)
+            except queue.Empty:
+                raw = None
 
-            if len(raw) < FRAME_BYTES:
-                # FFmpeg exited — read stderr from temp file for diagnostics
-                proc.kill()
-                proc.wait()
+            if raw is None:
                 stderr_str = _read_stderr()
+                low = stderr_str.lower()
 
-                if frames_read == 0:
-                    # Never decoded a single frame — real connection error
-                    low = stderr_str.lower()
-                    if "403" in stderr_str or "forbidden" in low or "connection refused" in low:
+                stream_ended = reader_state.get("eof") or (proc is not None and proc.poll() is not None)
+
+                if proc is not None and proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+                _stop_reader(reader_stop, reader_thread)
+
+                # Fallback: direct HTTP file URL can fail in ffmpeg network demux on some hosts.
+                if (
+                    frames_processed == 0
+                    and not tried_http_file_fallback
+                    and source_input == url
+                    and _is_http_file_source(url)
+                ):
+                    tried_http_file_fallback = True
+                    try:
+                        downloaded_file_path = await loop.run_in_executor(None, _download_http_file, url)
+                        source_input = downloaded_file_path
+                        print(f"[stream] Download fallback ready: {downloaded_file_path}")
+                        tracker = Sort(max_age=8, min_hits=TRACKER_MIN_HITS, iou_threshold=0.3)
+                        _video_anomaly_detector = AnomalyDetector()
+                        frames_processed = 0
+                        proc = await loop.run_in_executor(None, _start_proc)
+                        frame_q, reader_stop, reader_thread, reader_state = _start_reader(proc)
+                        print(f"[stream] FFmpeg opened: {source_input}")
+                        continue
+                    except Exception as dl_err:
+                        stream_status["error"] = f"Failed to download URL file: {dl_err}"
+                        break
+
+                if frames_processed == 0:
+                    if source_input.lower().startswith("rtsp://"):
                         stream_status["error"] = (
-                            "Connection refused — RTSP port 554 is blocked in this "
-                            "environment. Use an HTTP/MJPEG stream URL instead."
+                            "Timed out waiting for the first RTSP frame. "
+                            "Check URL, credentials, camera reachability, and network/port access."
+                        )
+                    elif "connection to tcp://" in low or "error number -138" in low:
+                        stream_status["error"] = (
+                            "Network cannot reach this stream host/port from this machine. "
+                            "Try another source or verify firewall/ISP/network access."
+                        )
+                    elif "403" in stderr_str or "forbidden" in low or "connection refused" in low:
+                        stream_status["error"] = (
+                            "Connection refused. For RTSP, verify camera reachability and port access; "
+                            "otherwise try an HTTP/MJPEG/HLS URL."
+                        )
+                    elif "timed out" in low or "i/o timeout" in low:
+                        stream_status["error"] = (
+                            "Connection timed out before receiving frames. "
+                            "Verify stream URL, credentials, and network access."
+                        )
+                    elif "nothing was written into output file" in low or "received no packets" in low:
+                        stream_status["error"] = (
+                            "No video packets received from this URL. "
+                            "Use a direct MJPEG/HLS/RTSP stream, or upload/download the file first."
+                        )
+                    elif stream_ended:
+                        last_line = stderr_str.strip().split("\n")[-1] if stderr_str.strip() else ""
+                        stream_status["error"] = (
+                            last_line[:250]
+                            or "Could not open stream source. Verify URL format, credentials, and camera/network reachability."
                         )
                     else:
-                        last_line = stderr_str.strip().split("\n")[-1] if stderr_str.strip() else ""
-                        stream_status["error"] = last_line[:250] or f"Could not open stream: {url}"
+                        stream_status["error"] = (
+                            "Timed out waiting for the first video frame. "
+                            "URL may not be a direct stream/video source."
+                        )
                     break
 
-                # Had frames — finite video (e.g. HTTP MP4) ended; loop it
-                print(f"[stream] Video ended after {frames_read} frames — looping")
-                tracker = Sort(max_age=5, min_hits=2, iou_threshold=0.3)
+                if not stream_ended:
+                    stream_status["error"] = "Stream stalled while reading frames."
+                    break
+
+                # Had frames and source ended (e.g. finite HTTP MP4) -> loop automatically.
+                print(f"[stream] Video ended after {frames_processed} frames; looping")
+                tracker = Sort(max_age=8, min_hits=TRACKER_MIN_HITS, iou_threshold=0.3)
                 _video_anomaly_detector = AnomalyDetector()
-                frames_read = 0
+                frames_processed = 0
                 proc = await loop.run_in_executor(None, _start_proc)
+                frame_q, reader_stop, reader_thread, reader_state = _start_reader(proc)
+                print(f"[stream] FFmpeg opened: {source_input}")
                 continue
 
-            frames_read += 1
+            frames_processed += 1
             frame = np.frombuffer(raw, dtype=np.uint8).reshape((H, W, 3)).copy()
-            detections = await loop.run_in_executor(None, detector.detect, frame)
+            detections = await loop.run_in_executor(None, detector.detect, frame, STREAM_CONFIDENCE)
             raw_tracks = tracker.update(detections)
 
             now = time.time()
-            _apply_config()
-            tracks = _build_tracks_from_yolo(raw_tracks)
+            tracks = _build_tracks_from_yolo(raw_tracks, W, H)
             anomalies = _video_anomaly_detector.update(tracks, now)
             tracks = _finalize_tracks(tracks, anomalies)
 
-            payload = build_frame_payload(tracks, anomalies, now, "stream")
+            payload = build_frame_payload(
+                tracks, anomalies, now, "stream", frame_for_archive=frame
+            )
             payload["frame_jpeg"] = _encode_preview(frame)
             if connected_clients:
                 await _broadcast(json.dumps(payload))
 
-            # Yield to the event loop briefly; FFmpeg's fps= filter is the
-            # real rate limiter — no additional sleep needed here.
             await asyncio.sleep(0)
 
     except asyncio.CancelledError:
@@ -433,8 +697,14 @@ async def stream_processing_loop(url: str):
         if proc and proc.poll() is None:
             proc.kill()
             proc.wait()
+        _stop_reader(reader_stop, reader_thread)
+        if downloaded_file_path and os.path.exists(downloaded_file_path):
+            try:
+                os.unlink(downloaded_file_path)
+            except Exception:
+                pass
         try:
-            _os.unlink(_stderr_path)
+            os.unlink(_stderr_path)
         except Exception:
             pass
         stream_status["active"] = False
@@ -442,8 +712,7 @@ async def stream_processing_loop(url: str):
         print("[stream] Stream processing stopped")
 
 
-# ─── Webcam frame processing loop ─────────────────────────────────────────────
-
+# â”€â”€â”€ Webcam frame processing loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async def webcam_processing_loop():
     """Pulls JPEG frames from _cam_frame_queue, runs YOLO+SORT, broadcasts."""
     global _video_anomaly_detector
@@ -463,7 +732,7 @@ async def webcam_processing_loop():
 
     try:
         detector = YOLOv8Detector()
-        tracker = Sort(max_age=3, min_hits=2, iou_threshold=0.3)
+        tracker = Sort(max_age=6, min_hits=TRACKER_MIN_HITS, iou_threshold=0.3)
         anomaly_detector = AnomalyDetector()
     except Exception as e:
         webcam_status["error"] = f"Detector init failed: {e}"
@@ -492,16 +761,17 @@ async def webcam_processing_loop():
                 continue
 
             frame = cv2.resize(frame, (1280, 720))
-            detections = detector.detect(frame)
+            detections = detector.detect(frame, conf_override=WEBCAM_DETECTION_CONFIDENCE)
             raw_tracks = tracker.update(detections)
 
             now = time.time()
-            _apply_config()
-            tracks = _build_tracks_from_yolo(raw_tracks)
+            tracks = _build_tracks_from_yolo(raw_tracks, 1280, 720)
             anomalies = anomaly_detector.update(tracks, now)
             tracks = _finalize_tracks(tracks, anomalies)
 
-            payload = build_frame_payload(tracks, anomalies, now, "webcam")
+            payload = build_frame_payload(
+                tracks, anomalies, now, "webcam", frame_for_archive=frame
+            )
             payload["frame_jpeg"] = _encode_preview(frame)
             if connected_clients:
                 await _broadcast(json.dumps(payload))
@@ -517,12 +787,11 @@ async def webcam_processing_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _apply_config()
     thread = threading.Thread(target=_download_model, daemon=True)
     thread.start()
     yield
-    _cancel_active()
-
-
+    await _cancel_active()
 # ─── App ──────────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="CrowdLens API", lifespan=lifespan)
@@ -530,7 +799,7 @@ app = FastAPI(title="CrowdLens API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -555,9 +824,61 @@ def get_alert_history(limit: int = 200):
     return {"alerts": history[:limit], "total": len(history)}
 
 
+@app.get("/api/archive")
+def get_archive(limit: int = 200):
+    """Return alerts that have stored evidence snapshots."""
+    history = [h for h in reversed(list(alert_history)) if h.get("snapshot_url")]
+    return {"items": history[:limit], "total": len(history)}
+
+
+@app.post("/api/archive/capture")
+def capture_archive_snapshot():
+    """Capture a manual evidence snapshot from the latest processed frame."""
+    global _alert_id_counter
+    if _latest_frame_for_snapshot is None:
+        raise HTTPException(409, "No processed frame available yet")
+
+    now = time.time()
+    snapshot_url = _save_archive_snapshot(_latest_frame_for_snapshot, now)
+    if not snapshot_url:
+        raise HTTPException(500, "Failed to save snapshot")
+
+    _alert_id_counter += 1
+    alert_history.append({
+        "id": _alert_id_counter,
+        "anomaly": {
+            "type": "manual_snapshot",
+            "track_id": None,
+            "position": None,
+            "note": "Manual evidence capture",
+        },
+        "timestamp": now,
+        "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+        "source": _processing_mode,
+        "snapshot_url": snapshot_url,
+    })
+    return {"success": True, "snapshot_url": snapshot_url}
+
+
+@app.get("/api/archive/image/{filename}")
+def get_archive_image(filename: str):
+    # Basic path traversal guard for local file serving.
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(400, "Invalid filename")
+    path = os.path.join(_archive_dir, filename)
+    if not os.path.exists(path):
+        raise HTTPException(404, "Snapshot not found")
+    return FileResponse(path, media_type="image/jpeg")
+
+
 @app.get("/api/config")
 def get_config():
-    return current_config
+    return {
+        **current_config,
+        "restricted_zones": RESTRICTED_ZONES,
+        "frame_width": FRAME_WIDTH,
+        "frame_height": FRAME_HEIGHT,
+    }
 
 
 class ConfigUpdate(BaseModel):
@@ -565,6 +886,12 @@ class ConfigUpdate(BaseModel):
     running_speed_threshold: float | None = None
     unattended_object_time: float | None = None
     stationary_threshold: float | None = None
+    unattended_owner_proximity_px: float | None = None
+    unattended_owner_grace_time: float | None = None
+    fall_aspect_ratio_threshold: float | None = None
+    fall_persistence_time: float | None = None
+    restricted_zone_enabled: bool | None = None
+    restricted_zone_min_dwell: float | None = None
 
 
 @app.put("/api/config")
@@ -577,6 +904,19 @@ def update_config(body: ConfigUpdate):
         current_config["unattended_object_time"] = body.unattended_object_time
     if body.stationary_threshold is not None:
         current_config["stationary_threshold"] = body.stationary_threshold
+    if body.unattended_owner_proximity_px is not None:
+        current_config["unattended_owner_proximity_px"] = body.unattended_owner_proximity_px
+    if body.unattended_owner_grace_time is not None:
+        current_config["unattended_owner_grace_time"] = body.unattended_owner_grace_time
+    if body.fall_aspect_ratio_threshold is not None:
+        current_config["fall_aspect_ratio_threshold"] = body.fall_aspect_ratio_threshold
+    if body.fall_persistence_time is not None:
+        current_config["fall_persistence_time"] = body.fall_persistence_time
+    if body.restricted_zone_enabled is not None:
+        current_config["restricted_zone_enabled"] = body.restricted_zone_enabled
+    if body.restricted_zone_min_dwell is not None:
+        current_config["restricted_zone_min_dwell"] = body.restricted_zone_min_dwell
+    _apply_config()
     return current_config
 
 
@@ -590,17 +930,35 @@ async def upload_video(file: UploadFile = File(...)):
     if ext not in {".mp4", ".avi", ".mov", ".mkv", ".webm"}:
         raise HTTPException(400, "Unsupported video format")
 
-    content = await file.read()
-    if len(content) > 500 * 1024 * 1024:
-        raise HTTPException(400, "File too large (max 500 MB)")
+    max_bytes = 500 * 1024 * 1024
+    total_size = 0
+    chunk_size = 1024 * 1024  # 1 MB
 
-    with open(VIDEO_UPLOAD_PATH, "wb") as f:
-        f.write(content)
+    try:
+        with open(VIDEO_UPLOAD_PATH, "wb") as f:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > max_bytes:
+                    raise HTTPException(400, "File too large (max 500 MB)")
+                f.write(chunk)
+    except HTTPException:
+        if os.path.exists(VIDEO_UPLOAD_PATH):
+            try:
+                os.remove(VIDEO_UPLOAD_PATH)
+            except Exception:
+                pass
+        raise
+
+    if total_size == 0:
+        raise HTTPException(400, "Uploaded file is empty")
 
     video_status["filename"] = file.filename
     video_status["mode"] = "ready"
     video_status["progress"] = 0
-    return {"success": True, "filename": file.filename, "size_mb": round(len(content) / 1e6, 1)}
+    return {"success": True, "filename": file.filename, "size_mb": round(total_size / 1e6, 1)}
 
 
 @app.post("/api/video/start")
@@ -611,7 +969,8 @@ async def start_video():
     if not is_model_ready():
         raise HTTPException(503, "YOLOv8n model is still loading, please wait")
 
-    _cancel_active()
+    await _cancel_active()
+    _reset_fps_window()
     _processing_mode = "video"
     video_status["mode"] = "processing"
     _active_task = asyncio.create_task(video_processing_loop())
@@ -621,7 +980,8 @@ async def start_video():
 @app.post("/api/video/stop")
 async def stop_video():
     global _processing_mode
-    _cancel_active()
+    await _cancel_active()
+    _reset_fps_window()
     _processing_mode = "idle"
     video_status["mode"] = "ready"
     video_status["progress"] = 0
@@ -651,7 +1011,8 @@ async def start_stream(body: StreamRequest):
     if not body.url.strip():
         raise HTTPException(400, "Stream URL is required")
 
-    _cancel_active()
+    await _cancel_active()
+    _reset_fps_window()
     _processing_mode = "stream"
     stream_status["url"] = body.url.strip()
     stream_status["error"] = None
@@ -662,7 +1023,8 @@ async def start_stream(body: StreamRequest):
 @app.post("/api/stream/stop")
 async def stop_stream():
     global _processing_mode
-    _cancel_active()
+    await _cancel_active()
+    _reset_fps_window()
     _processing_mode = "idle"
     stream_status["active"] = False
     stream_status["url"] = None
@@ -695,7 +1057,8 @@ async def start_webcam():
     if not is_model_ready():
         raise HTTPException(503, "YOLOv8n model not ready yet — please wait")
 
-    _cancel_active()
+    await _cancel_active()
+    _reset_fps_window()
     _processing_mode = "webcam"
     webcam_status["error"] = None
     webcam_status["active"] = False  # set True when loop starts
@@ -712,7 +1075,8 @@ async def start_webcam():
 @app.post("/api/webcam/stop")
 async def stop_webcam():
     global _processing_mode
-    _cancel_active()
+    await _cancel_active()
+    _reset_fps_window()
     _processing_mode = "idle"
     webcam_status["active"] = False
     return {"success": True}
@@ -806,3 +1170,4 @@ async def webcam_ws(websocket: WebSocket):
                     pass  # Drop frame if queue is full
     except WebSocketDisconnect:
         print("[ws/cam] Webcam client disconnected")
+

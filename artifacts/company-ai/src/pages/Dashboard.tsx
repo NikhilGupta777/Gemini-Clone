@@ -37,6 +37,15 @@ interface WebcamStatusData {
   model_error: string | null;
 }
 
+interface RestrictedZone {
+  id: string;
+  name?: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 const PILL_STYLE = {
   background: "rgba(255,255,255,0.04)",
   border: "1px solid rgba(255,255,255,0.08)",
@@ -67,8 +76,11 @@ export default function Dashboard() {
   const [streamStatus, setStreamStatus] = useState<StreamStatusData | null>(null);
   const [streamUrl, setStreamUrl] = useState("");
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [captureInfo, setCaptureInfo] = useState<string | null>(null);
+  const [capturingSnapshot, setCapturingSnapshot] = useState(false);
 
   const [webcamStatus, setWebcamStatus] = useState<WebcamStatusData | null>(null);
+  const [restrictedZones, setRestrictedZones] = useState<RestrictedZone[]>([]);
 
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -130,6 +142,19 @@ export default function Dashboard() {
     poll();
     const id = setInterval(poll, 2000);
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const res = await fetch("/api/config");
+        const data = await res.json();
+        if (Array.isArray(data.restricted_zones)) {
+          setRestrictedZones(data.restricted_zones);
+        }
+      } catch {}
+    };
+    loadConfig();
   }, []);
 
   // ── Webcam ──────────────────────────────────────────────────────────────────
@@ -220,12 +245,24 @@ export default function Dashboard() {
 
   const startStream = async () => {
     setStreamError(null);
-    if (!streamUrl.trim()) { setStreamError("Enter a stream URL first"); return; }
+    const rawInput = streamUrl.trim();
+    if (!rawInput) { setStreamError("Enter a stream URL first"); return; }
+
+    const matched = rawInput.match(/(rtsp:\/\/[^\s]+|https?:\/\/[^\s]+)/i);
+    if (!matched) {
+      setStreamError("Enter a valid URL starting with rtsp://, http://, or https://");
+      return;
+    }
+    const normalizedUrl = matched[1].replace(/[),.;]+$/, "");
+    if (normalizedUrl !== rawInput) {
+      setStreamUrl(normalizedUrl);
+    }
+
     try {
       const res = await fetch("/api/stream/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: streamUrl.trim() }),
+        body: JSON.stringify({ url: normalizedUrl }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.detail ?? "Could not start stream");
@@ -238,6 +275,22 @@ export default function Dashboard() {
   const stopStream = async () => {
     await fetch("/api/stream/stop", { method: "POST" });
     setSourceMode("idle");
+  };
+
+  const captureSnapshot = async () => {
+    if (capturingSnapshot) return;
+    setCapturingSnapshot(true);
+    setCaptureInfo(null);
+    try {
+      const res = await fetch("/api/archive/capture", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail ?? "Failed to capture snapshot");
+      setCaptureInfo("Snapshot captured. Open Alert History and check latest entry.");
+    } catch (e: unknown) {
+      setCaptureInfo(e instanceof Error ? e.message : "Snapshot capture failed");
+    } finally {
+      setCapturingSnapshot(false);
+    }
   };
 
   const isVideoProcessing = videoStatus?.mode === "processing";
@@ -358,6 +411,22 @@ export default function Dashboard() {
             {isStreaming ? "Stream Active" : "Live Stream"}
           </button>
 
+          <button
+            onClick={captureSnapshot}
+            disabled={capturingSnapshot || sourceMode === "idle"}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.12)",
+              cursor: (capturingSnapshot || sourceMode === "idle") ? "not-allowed" : "pointer",
+              fontSize: 12, fontWeight: 600,
+              background: "rgba(59,130,246,0.12)", color: "#60a5fa",
+              opacity: (capturingSnapshot || sourceMode === "idle") ? 0.5 : 1,
+            }}
+          >
+            {capturingSnapshot ? <Loader size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Camera size={14} />}
+            Capture Snapshot
+          </button>
+
           {/* Mode badge */}
           <div style={{
             padding: "8px 14px", borderRadius: 8, border: `1px solid ${modeBadge.color}33`,
@@ -371,6 +440,20 @@ export default function Dashboard() {
       </div>
 
       {/* ── Video Upload Panel ── */}
+      {captureInfo && (
+        <div
+          style={{
+            color: captureInfo.toLowerCase().includes("fail") || captureInfo.toLowerCase().includes("no ")
+              ? "#ef4444"
+              : "#10b981",
+            fontSize: 12,
+            marginBottom: 12,
+          }}
+        >
+          {captureInfo}
+        </div>
+      )}
+
       {activePanel === "video" && (
         <div style={{
           background: "rgba(168,85,247,0.05)", border: "1px solid rgba(168,85,247,0.2)",
@@ -509,14 +592,14 @@ export default function Dashboard() {
               fontSize: 11, color: "#92400e", background: "rgba(245,158,11,0.08)",
               border: "1px solid rgba(245,158,11,0.2)", borderRadius: 7, padding: "7px 10px", marginBottom: 10,
             }}>
-              ⚠ <strong style={{ color: "#f59e0b" }}>RTSP (port 554) is blocked</strong> in cloud environments.
-              Use <strong>HTTP/MJPEG</strong> or a public <strong>HTTP MP4 URL</strong> instead.
-              HTTP MP4 files will loop automatically.
+              ⚠ <strong style={{ color: "#f59e0b" }}>RTSP/MJPEG availability depends on network reachability</strong>
+              {" "} (camera online, open port, firewall/ISP rules). If a source fails, try a different URL or use
+              <strong> HTTP MP4</strong> for pipeline verification. HTTP MP4 files loop automatically.
             </div>
             <div style={{ fontSize: 10, color: "#334155", marginBottom: 10, lineHeight: 1.8 }}>
               <code style={{ color: "#10b981" }}>http://IP:PORT/video</code> — HTTP MJPEG camera ✓<br />
               <code style={{ color: "#10b981" }}>https://example.com/video.mp4</code> — HTTP MP4 file (loops) ✓<br />
-              <code style={{ color: "#475569" }}>rtsp://192.168.1.100:554/stream</code> — RTSP (blocked in cloud) ✗
+              <code style={{ color: "#475569" }}>rtsp://192.168.1.100:554/stream</code> — RTSP (must be reachable) ✗
             </div>
             <button
               onClick={() => setStreamUrl("http://localhost:8080/api/stream/test-feed")}
@@ -613,6 +696,7 @@ export default function Dashboard() {
               videoRef={videoElRef}
               sourceMode={displayMode}
               frameJpeg={frame?.frame_jpeg}
+              restrictedZones={restrictedZones}
             />
           </div>
 

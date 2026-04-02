@@ -36,6 +36,15 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 
 type SourceMode = "idle" | "video" | "webcam" | "stream";
 
+interface RestrictedZone {
+  id: string;
+  name?: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 interface Props {
   tracks: Track[];
   anomalies: Anomaly[];
@@ -43,10 +52,11 @@ interface Props {
   videoRef: RefObject<HTMLVideoElement | null>;
   sourceMode?: SourceMode;
   frameJpeg?: string;
+  restrictedZones?: RestrictedZone[];
 }
 
 function SimulationCanvas({
-  tracks, anomalies, cameraMode, videoRef, sourceMode = "idle", frameJpeg,
+  tracks, anomalies, cameraMode, videoRef, sourceMode = "idle", frameJpeg, restrictedZones = [],
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -66,10 +76,10 @@ function SimulationCanvas({
   }, [frameJpeg]);
 
   // Keep latest data in a ref so the RAF loop can read it without stale closures
-  const dataRef = useRef({ tracks, anomalies, cameraMode, sourceMode });
+  const dataRef = useRef({ tracks, anomalies, cameraMode, sourceMode, restrictedZones });
   useEffect(() => {
-    dataRef.current = { tracks, anomalies, cameraMode, sourceMode };
-  }, [tracks, anomalies, cameraMode, sourceMode]);
+    dataRef.current = { tracks, anomalies, cameraMode, sourceMode, restrictedZones };
+  }, [tracks, anomalies, cameraMode, sourceMode, restrictedZones]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -79,7 +89,7 @@ function SimulationCanvas({
 
     function draw() {
       if (!ctx || !canvas) return;
-      const { tracks, anomalies, cameraMode, sourceMode } = dataRef.current;
+      const { tracks, anomalies, cameraMode, sourceMode, restrictedZones } = dataRef.current;
       const t = Date.now();
       const anomalyIds = getAnomalyIds(anomalies);
 
@@ -144,6 +154,35 @@ function SimulationCanvas({
         ctx.globalAlpha = 1;
       }
       ctx.setLineDash([]);
+
+      if (sourceMode !== "idle" && restrictedZones.length > 0) {
+        const activeRestrictedIds = new Set(
+          anomalies
+            .filter((a) => a.type === "restricted_zone" && a.zone_id)
+            .map((a) => a.zone_id as string)
+        );
+
+        for (const zone of restrictedZones) {
+          const isActive = activeRestrictedIds.has(zone.id);
+          ctx.setLineDash([6, 5]);
+          ctx.lineWidth = isActive ? 2.5 : 1.6;
+          ctx.strokeStyle = isActive ? "rgba(234,179,8,0.95)" : "rgba(234,179,8,0.45)";
+          ctx.strokeRect(zone.x1, zone.y1, zone.x2 - zone.x1, zone.y2 - zone.y1);
+          ctx.setLineDash([]);
+
+          ctx.fillStyle = isActive ? "rgba(234,179,8,0.16)" : "rgba(234,179,8,0.08)";
+          ctx.fillRect(zone.x1, zone.y1, zone.x2 - zone.x1, zone.y2 - zone.y1);
+
+          const zoneLabel = zone.name ? `${zone.name} (${zone.id})` : zone.id;
+          ctx.font = "700 10px monospace";
+          const lw = ctx.measureText(zoneLabel).width;
+          roundRect(ctx, zone.x1 + 6, Math.max(6, zone.y1 - 18), lw + 12, 14, 4);
+          ctx.fillStyle = isActive ? "rgba(234,179,8,0.85)" : "rgba(234,179,8,0.6)";
+          ctx.fill();
+          ctx.fillStyle = "#05080f";
+          ctx.fillText(zoneLabel, zone.x1 + 12, Math.max(16, zone.y1 - 8));
+        }
+      }
 
       // ── Detection tracks ────────────────────────────────────────────────────
 
@@ -219,6 +258,27 @@ function SimulationCanvas({
           ctx.setLineDash([4, 4]);
           ctx.beginPath(); ctx.arc(ax, ay, 50, 0, 2 * Math.PI); ctx.stroke();
           ctx.setLineDash([]);
+        } else if (anomaly.type === "fall_detected") {
+          ctx.strokeStyle = `rgba(220,38,38,${0.45 + 0.3 * pulse})`;
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([8, 4]);
+          ctx.beginPath(); ctx.arc(ax, ay, 42, 0, 2 * Math.PI); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = "700 10px monospace";
+          ctx.fillStyle = "#dc2626";
+          const txt = "⚠ FALL DETECTED";
+          ctx.fillText(txt, ax - ctx.measureText(txt).width / 2, ay - 50);
+        } else if (anomaly.type === "restricted_zone") {
+          ctx.strokeStyle = `rgba(234,179,8,${0.45 + 0.3 * pulse})`;
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath(); ctx.arc(ax, ay, 38, 0, 2 * Math.PI); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = "700 10px monospace";
+          ctx.fillStyle = "#eab308";
+          const zoneText = anomaly.zone_name ?? anomaly.zone_id ?? "ZONE";
+          const txt = `⚠ RESTRICTED ${zoneText}`;
+          ctx.fillText(txt, ax - ctx.measureText(txt).width / 2, ay - 46);
         }
       }
 
@@ -277,6 +337,21 @@ export default memo(SimulationCanvas, (prev, next) => {
   if (prev.sourceMode !== next.sourceMode) return false;
   if (prev.cameraMode !== next.cameraMode) return false;
   if (prev.videoRef !== next.videoRef) return false;
+  if ((prev.restrictedZones?.length ?? 0) !== (next.restrictedZones?.length ?? 0)) return false;
+  if ((prev.restrictedZones?.length ?? 0) > 0) {
+    for (let i = 0; i < (prev.restrictedZones?.length ?? 0); i++) {
+      const pz = prev.restrictedZones?.[i];
+      const nz = next.restrictedZones?.[i];
+      if (!pz || !nz) return false;
+      if (
+        pz.id !== nz.id
+        || pz.x1 !== nz.x1
+        || pz.y1 !== nz.y1
+        || pz.x2 !== nz.x2
+        || pz.y2 !== nz.y2
+      ) return false;
+    }
+  }
   if (prev.tracks.length !== next.tracks.length) return false;
   if (prev.anomalies.length !== next.anomalies.length) return false;
   for (let i = 0; i < prev.tracks.length; i++) {
