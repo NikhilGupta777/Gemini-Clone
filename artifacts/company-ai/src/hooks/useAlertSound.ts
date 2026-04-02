@@ -79,10 +79,19 @@ export function useAlertSound(anomalies: Anomaly[], enabled = true) {
         if (type === "running") {
           playTone(ctx, 1000, 0.2, 0.25, 0);
           playTone(ctx, 1200, 0.15, 0.2, 260);
+        } else if (type === "fight_suspected") {
+          playTone(ctx, 1100, 0.18, 0.28, 0);
+          playTone(ctx, 900, 0.18, 0.24, 220);
+          playTone(ctx, 1300, 0.16, 0.2, 440);
         } else if (type === "unattended_object") {
           playTone(ctx, 800, 0.3, 0.25, 0);
         } else if (type === "overcrowding") {
           playTone(ctx, 600, 0.4, 0.15, 0);
+        } else if (type === "fall_detected") {
+          playTone(ctx, 720, 0.3, 0.22, 0);
+          playTone(ctx, 520, 0.25, 0.18, 300);
+        } else if (type === "restricted_zone") {
+          playTone(ctx, 950, 0.22, 0.2, 0);
         }
 
         lastPlayedRef.current[type] = now;

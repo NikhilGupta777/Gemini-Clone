@@ -81,6 +81,7 @@ export default function Dashboard() {
 
   const [webcamStatus, setWebcamStatus] = useState<WebcamStatusData | null>(null);
   const [restrictedZones, setRestrictedZones] = useState<RestrictedZone[]>([]);
+  const [zoneEnabled, setZoneEnabled] = useState(true);
 
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -151,6 +152,9 @@ export default function Dashboard() {
         const data = await res.json();
         if (Array.isArray(data.restricted_zones)) {
           setRestrictedZones(data.restricted_zones);
+        }
+        if (typeof data.restricted_zone_enabled === "boolean") {
+          setZoneEnabled(data.restricted_zone_enabled);
         }
       } catch {}
     };
@@ -293,6 +297,22 @@ export default function Dashboard() {
     }
   };
 
+  const toggleRestrictedZone = async () => {
+    const next = !zoneEnabled;
+    try {
+      const res = await fetch("/api/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restricted_zone_enabled: next }),
+      });
+      if (!res.ok) throw new Error("Failed to update restricted zone setting");
+      setZoneEnabled(next);
+      setCaptureInfo(next ? "Restricted zone detection enabled." : "Restricted zone detection disabled.");
+    } catch {
+      setCaptureInfo("Could not change restricted zone setting.");
+    }
+  };
+
   const isVideoProcessing = videoStatus?.mode === "processing";
   const hasUpload = !!(videoStatus?.filename && videoStatus?.mode !== "idle");
   const isStreaming = streamStatus?.active === true || sourceMode === "stream";
@@ -425,6 +445,20 @@ export default function Dashboard() {
           >
             {capturingSnapshot ? <Loader size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Camera size={14} />}
             Capture Snapshot
+          </button>
+
+          <button
+            onClick={toggleRestrictedZone}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.12)", cursor: "pointer",
+              fontSize: 12, fontWeight: 700,
+              background: zoneEnabled ? "rgba(234,179,8,0.12)" : "rgba(255,255,255,0.04)",
+              color: zoneEnabled ? "#eab308" : "#64748b",
+            }}
+          >
+            <Monitor size={14} />
+            {zoneEnabled ? "Zone ON" : "Zone OFF"}
           </button>
 
           {/* Mode badge */}
@@ -696,7 +730,7 @@ export default function Dashboard() {
               videoRef={videoElRef}
               sourceMode={displayMode}
               frameJpeg={frame?.frame_jpeg}
-              restrictedZones={restrictedZones}
+              restrictedZones={zoneEnabled ? restrictedZones : []}
             />
           </div>
 

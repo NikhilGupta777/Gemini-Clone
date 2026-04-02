@@ -23,6 +23,8 @@ from backend.config import (
     UNATTENDED_OWNER_PROXIMITY_PX, UNATTENDED_OWNER_GRACE_TIME,
     FALL_ASPECT_RATIO_THRESHOLD, FALL_PERSISTENCE_TIME,
     RESTRICTED_ZONE_ENABLED, RESTRICTED_ZONE_MIN_DWELL,
+    FIGHT_DETECTION_ENABLED, FIGHT_PROXIMITY_PX, FIGHT_MIN_PAIR_SPEED,
+    FIGHT_PERSISTENCE_TIME, FIGHT_MIN_HIT_STREAK,
     RESTRICTED_ZONES, FRAME_WIDTH, FRAME_HEIGHT,
     STREAM_FRAME_WIDTH, STREAM_FRAME_HEIGHT,
     STREAM_TARGET_FPS, STREAM_DETECTION_CONFIDENCE,
@@ -47,6 +49,11 @@ current_config = {
     "fall_persistence_time": FALL_PERSISTENCE_TIME,
     "restricted_zone_enabled": RESTRICTED_ZONE_ENABLED,
     "restricted_zone_min_dwell": RESTRICTED_ZONE_MIN_DWELL,
+    "fight_detection_enabled": FIGHT_DETECTION_ENABLED,
+    "fight_proximity_px": FIGHT_PROXIMITY_PX,
+    "fight_min_pair_speed": FIGHT_MIN_PAIR_SPEED,
+    "fight_persistence_time": FIGHT_PERSISTENCE_TIME,
+    "fight_min_hit_streak": FIGHT_MIN_HIT_STREAK,
 }
 
 stats_snapshot = {
@@ -824,6 +831,15 @@ def get_alert_history(limit: int = 200):
     return {"alerts": history[:limit], "total": len(history)}
 
 
+@app.post("/api/alerts/clear")
+def clear_alert_history():
+    global _alert_id_counter
+    cleared = len(alert_history)
+    alert_history.clear()
+    _alert_id_counter = 0
+    return {"success": True, "cleared": cleared}
+
+
 @app.get("/api/archive")
 def get_archive(limit: int = 200):
     """Return alerts that have stored evidence snapshots."""
@@ -871,6 +887,21 @@ def get_archive_image(filename: str):
     return FileResponse(path, media_type="image/jpeg")
 
 
+@app.post("/api/archive/clear")
+def clear_archive():
+    removed = 0
+    for fn in os.listdir(_archive_dir):
+        p = os.path.join(_archive_dir, fn)
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+                removed += 1
+        except Exception:
+            # Keep cleanup resilient for demo use.
+            pass
+    return {"success": True, "removed": removed}
+
+
 @app.get("/api/config")
 def get_config():
     return {
@@ -892,6 +923,11 @@ class ConfigUpdate(BaseModel):
     fall_persistence_time: float | None = None
     restricted_zone_enabled: bool | None = None
     restricted_zone_min_dwell: float | None = None
+    fight_detection_enabled: bool | None = None
+    fight_proximity_px: float | None = None
+    fight_min_pair_speed: float | None = None
+    fight_persistence_time: float | None = None
+    fight_min_hit_streak: int | None = None
 
 
 @app.put("/api/config")
@@ -916,6 +952,16 @@ def update_config(body: ConfigUpdate):
         current_config["restricted_zone_enabled"] = body.restricted_zone_enabled
     if body.restricted_zone_min_dwell is not None:
         current_config["restricted_zone_min_dwell"] = body.restricted_zone_min_dwell
+    if body.fight_detection_enabled is not None:
+        current_config["fight_detection_enabled"] = body.fight_detection_enabled
+    if body.fight_proximity_px is not None:
+        current_config["fight_proximity_px"] = body.fight_proximity_px
+    if body.fight_min_pair_speed is not None:
+        current_config["fight_min_pair_speed"] = body.fight_min_pair_speed
+    if body.fight_persistence_time is not None:
+        current_config["fight_persistence_time"] = body.fight_persistence_time
+    if body.fight_min_hit_streak is not None:
+        current_config["fight_min_hit_streak"] = body.fight_min_hit_streak
     _apply_config()
     return current_config
 

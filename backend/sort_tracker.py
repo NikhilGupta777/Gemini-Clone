@@ -56,7 +56,13 @@ def _associate(detections, predictions, iou_threshold=0.3):
     cost = np.zeros((len(detections), len(predictions)))
     for d, det in enumerate(detections):
         for t, pred in enumerate(predictions):
-            cost[d, t] = 1.0 - _iou(det, pred)
+            det_box, det_class = det
+            pred_box, pred_class = pred
+            if det_class != pred_class:
+                # Keep class identity stable: do not match person<->object tracks.
+                cost[d, t] = 1e6
+                continue
+            cost[d, t] = 1.0 - _iou(det_box, pred_box)
 
     row_ind, col_ind = linear_sum_assignment(cost)
 
@@ -68,9 +74,6 @@ def _associate(detections, predictions, iou_threshold=0.3):
             matches.append((r, c))
             matched_d.add(r)
             matched_t.add(c)
-        else:
-            unmatched_d.append(r)
-            unmatched_t.append(c)
 
     for d in range(len(detections)):
         if d not in matched_d:
@@ -175,11 +178,11 @@ class Sort:
             if np.any(np.isnan(pred)):
                 dead.append(i)
             else:
-                predictions.append(pred.tolist())
+                predictions.append((pred.tolist(), trk.class_id))
         for i in reversed(dead):
             self.trackers.pop(i)
 
-        det_boxes = [d["bbox"] for d in detections]
+        det_boxes = [(d["bbox"], d["class_id"]) for d in detections]
         matches, unmatched_dets, unmatched_trks = _associate(
             det_boxes, predictions, self.iou_threshold
         )
@@ -214,6 +217,8 @@ class Sort:
                     "bbox": box,
                     "class_id": trk.class_id,
                     "confidence": trk.confidence,
+                    "hit_streak": trk.hit_streak,
+                    "age": trk.age,
                 })
 
         # Prune dead trackers

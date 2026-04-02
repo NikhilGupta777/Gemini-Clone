@@ -7,7 +7,7 @@ import Settings from "./pages/Settings";
 
 function getThreatLevel(anomalyCount: number, types: string[]): "secure" | "warning" | "critical" {
   if (anomalyCount === 0) return "secure";
-  if (types.includes("running") || types.includes("unattended_object")) return "critical";
+  if (types.includes("running") || types.includes("unattended_object") || types.includes("fight_suspected")) return "critical";
   return "warning";
 }
 

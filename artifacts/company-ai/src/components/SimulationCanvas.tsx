@@ -258,6 +258,16 @@ function SimulationCanvas({
           ctx.setLineDash([4, 4]);
           ctx.beginPath(); ctx.arc(ax, ay, 50, 0, 2 * Math.PI); ctx.stroke();
           ctx.setLineDash([]);
+        } else if (anomaly.type === "fight_suspected") {
+          ctx.strokeStyle = `rgba(244,63,94,${0.45 + 0.3 * pulse})`;
+          ctx.lineWidth = 3;
+          ctx.setLineDash([10, 4]);
+          ctx.beginPath(); ctx.arc(ax, ay, 56, 0, 2 * Math.PI); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = "700 10px monospace";
+          ctx.fillStyle = "#f43f5e";
+          const txt = "⚠ FIGHT SUSPECTED";
+          ctx.fillText(txt, ax - ctx.measureText(txt).width / 2, ay - 64);
         } else if (anomaly.type === "fall_detected") {
           ctx.strokeStyle = `rgba(220,38,38,${0.45 + 0.3 * pulse})`;
           ctx.lineWidth = 2.5;

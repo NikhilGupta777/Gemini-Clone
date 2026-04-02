@@ -13,6 +13,8 @@ dependencies = [
     "pydantic>=2.0.0",
     "python-multipart>=0.0.9",
     "scipy>=1.11.0",
+    "torch>=2.5.1,<2.6",
+    "torchvision>=0.20.1,<0.21",
     "ultralytics>=8.0.0",
     "uvicorn[standard]>=0.29.0",
     "websockets>=12.0",
@@ -22,6 +24,11 @@ dependencies = [
 explicit = true
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+
+[[tool.uv.index]]
+explicit = true
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
 
 [tool.uv.sources]
 AA-module = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
@@ -978,7 +985,10 @@ tmnt = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 toad = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 tomesd = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 top2vec = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
-torch = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
+torch = [
+    { index = "pytorch-cpu", marker = "platform_system == 'Linux'" },
+    { index = "pytorch-cu121", marker = "platform_system == 'Windows'" },
+]
 torch-audiomentations = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 torch-dct = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 torch-delaunay = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
@@ -1055,7 +1065,10 @@ torchtnt-nightly = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux
 torchtyping = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 torchutil = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 torchvinecopulib = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
-torchvision = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
+torchvision = [
+    { index = "pytorch-cpu", marker = "platform_system == 'Linux'" },
+    { index = "pytorch-cu121", marker = "platform_system == 'Windows'" },
+]
 torchviz = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 torchx = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]
 torchx-nightly = [{ index = "pytorch-cpu", marker = "platform_system == 'Linux'" }]

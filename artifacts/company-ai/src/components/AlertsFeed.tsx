@@ -1,5 +1,5 @@
 import { Anomaly } from "../hooks/useSimulation";
-import { Zap, AlertCircle, Users } from "lucide-react";
+import { Zap, AlertCircle, Users, ShieldAlert, PersonStanding } from "lucide-react";
 
 const ANOMALY_META: Record<string, {
   color: string;
@@ -9,8 +9,11 @@ const ANOMALY_META: Record<string, {
   severity: string;
 }> = {
   running:          { color: "#a855f7", bg: "rgba(168,85,247,0.08)",  Icon: Zap,         label: "Running Detected",   severity: "CRITICAL" },
+  fight_suspected:  { color: "#f43f5e", bg: "rgba(244,63,94,0.10)",   Icon: AlertCircle, label: "Fight Suspected",    severity: "CRITICAL" },
   unattended_object:{ color: "#ef4444", bg: "rgba(239,68,68,0.08)",   Icon: AlertCircle, label: "Unattended Object",  severity: "HIGH"     },
   overcrowding:     { color: "#f97316", bg: "rgba(249,115,22,0.08)",  Icon: Users,       label: "Overcrowding",       severity: "MEDIUM"   },
+  fall_detected:    { color: "#dc2626", bg: "rgba(220,38,38,0.10)",   Icon: PersonStanding, label: "Fall Detected",   severity: "HIGH"     },
+  restricted_zone:  { color: "#eab308", bg: "rgba(234,179,8,0.10)",   Icon: ShieldAlert, label: "Restricted Zone",    severity: "HIGH"     },
 };
 
 interface Props {
@@ -128,8 +131,23 @@ export default function AlertsFeed({ anomalies }: Props) {
                   {a.avg_speed !== undefined && (
                     <span style={{ fontSize: 10, color: "#a855f7", fontWeight: 600 }}>{a.avg_speed} px/f</span>
                   )}
+                  {a.avg_pair_speed !== undefined && (
+                    <span style={{ fontSize: 10, color: "#f43f5e", fontWeight: 600 }}>{a.avg_pair_speed} pair px/f</span>
+                  )}
+                  {a.distance !== undefined && (
+                    <span style={{ fontSize: 10, color: "#f43f5e", fontWeight: 600 }}>{a.distance}px separation</span>
+                  )}
+                  {a.track_ids && a.track_ids.length >= 2 && (
+                    <span style={{ fontSize: 10, color: "#f43f5e" }}>Pair #{a.track_ids[0]} & #{a.track_ids[1]}</span>
+                  )}
                   {a.duration !== undefined && (
                     <span style={{ fontSize: 10, color: "#64748b" }}>{a.duration}s elapsed</span>
+                  )}
+                  {a.aspect_ratio !== undefined && (
+                    <span style={{ fontSize: 10, color: "#dc2626", fontWeight: 600 }}>ratio {a.aspect_ratio}</span>
+                  )}
+                  {a.zone_name && (
+                    <span style={{ fontSize: 10, color: "#eab308", fontWeight: 600 }}>{a.zone_name}</span>
                   )}
                   {a.position && (
                     <span style={{ fontSize: 10, color: "#1e3a5f", fontFamily: "monospace" }}>

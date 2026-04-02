@@ -6,6 +6,8 @@ from backend.config import (
     UNATTENDED_OWNER_PROXIMITY_PX, UNATTENDED_OWNER_GRACE_TIME,
     FALL_ASPECT_RATIO_THRESHOLD, FALL_PERSISTENCE_TIME,
     RESTRICTED_ZONE_ENABLED, RESTRICTED_ZONE_MIN_DWELL, RESTRICTED_ZONES,
+    FIGHT_DETECTION_ENABLED, FIGHT_PROXIMITY_PX, FIGHT_MIN_PAIR_SPEED,
+    FIGHT_PERSISTENCE_TIME, FIGHT_MIN_HIT_STREAK,
     FRAME_WIDTH, FRAME_HEIGHT,
 )
 
@@ -16,6 +18,8 @@ class AnomalyDetector:
         self.running_candidate_since: dict[int, float] = {}
         self.fall_candidate_since: dict[int, float] = {}
         self.zone_entry_since: dict[tuple[int, str], float] = {}
+        self.fight_candidate_since: dict[tuple[int, int], float] = {}
+        self.fight_last_alert_at: dict[tuple[int, int], float] = {}
         self.owner_absent_since: dict[int, float] = {}
 
     def update(self, tracks: list, current_time: float) -> list:
@@ -33,6 +37,8 @@ class AnomalyDetector:
             for t in tracks
             if t["class_id"] == 0
         ]
+
+        person_motion: dict[int, dict] = {}
 
         for track in tracks:
             track_id = track["id"]
@@ -56,6 +62,12 @@ class AnomalyDetector:
                 for i in range(1, len(recent)):
                     dist += np.hypot(recent[i][0] - recent[i-1][0], recent[i][1] - recent[i-1][1])
                 avg_speed = dist / len(recent)
+                person_motion[track_id] = {
+                    "cx": cx,
+                    "cy": cy,
+                    "avg_speed": float(avg_speed),
+                    "hit_streak": hit_streak,
+                }
 
                 # Require stable track age and persistence window to reduce
                 # false running alerts from brief SORT ID switches/jitter.
@@ -151,6 +163,59 @@ class AnomalyDetector:
                             "position": [cx, cy]
                         })
 
+        if FIGHT_DETECTION_ENABLED and len(person_motion) >= 2:
+            active_fight_pairs: set[tuple[int, int]] = set()
+            person_ids = sorted(person_motion.keys())
+            for i in range(len(person_ids)):
+                for j in range(i + 1, len(person_ids)):
+                    id1 = person_ids[i]
+                    id2 = person_ids[j]
+                    p1 = person_motion[id1]
+                    p2 = person_motion[id2]
+                    pair_key = (id1, id2)
+
+                    close_enough = np.hypot(p1["cx"] - p2["cx"], p1["cy"] - p2["cy"]) <= FIGHT_PROXIMITY_PX
+                    fast_both = (
+                        p1["avg_speed"] >= FIGHT_MIN_PAIR_SPEED
+                        and p2["avg_speed"] >= FIGHT_MIN_PAIR_SPEED
+                    )
+                    stable_tracks = (
+                        p1["hit_streak"] >= FIGHT_MIN_HIT_STREAK
+                        and p2["hit_streak"] >= FIGHT_MIN_HIT_STREAK
+                    )
+
+                    if close_enough and fast_both and stable_tracks:
+                        active_fight_pairs.add(pair_key)
+                        if pair_key not in self.fight_candidate_since:
+                            self.fight_candidate_since[pair_key] = current_time
+                            continue
+
+                        persisted = current_time - self.fight_candidate_since[pair_key]
+                        if persisted >= FIGHT_PERSISTENCE_TIME:
+                            last_alert = self.fight_last_alert_at.get(pair_key, 0.0)
+                            # Keep signal visible while avoiding frame-by-frame alert spam.
+                            if current_time - last_alert >= 1.5:
+                                mid_x = (p1["cx"] + p2["cx"]) / 2.0
+                                mid_y = (p1["cy"] + p2["cy"]) / 2.0
+                                anomalies.append({
+                                    "type": "fight_suspected",
+                                    "track_id": id1,
+                                    "track_ids": [id1, id2],
+                                    "avg_pair_speed": round((p1["avg_speed"] + p2["avg_speed"]) / 2.0, 1),
+                                    "distance": float(round(np.hypot(p1["cx"] - p2["cx"], p1["cy"] - p2["cy"]), 1)),
+                                    "duration": round(persisted, 1),
+                                    "position": [mid_x, mid_y],
+                                })
+                                self.fight_last_alert_at[pair_key] = current_time
+                    else:
+                        self.fight_candidate_since.pop(pair_key, None)
+                        self.fight_last_alert_at.pop(pair_key, None)
+
+            stale_fights = [k for k in self.fight_candidate_since if k not in active_fight_pairs]
+            for k in stale_fights:
+                self.fight_candidate_since.pop(k, None)
+                self.fight_last_alert_at.pop(k, None)
+
         active_ids = {t["id"] for t in tracks}
         stale = [k for k in self.track_history if k not in active_ids]
         for k in stale:
@@ -162,5 +227,10 @@ class AnomalyDetector:
         stale_zone_keys = [k for k in self.zone_entry_since if k[0] not in active_ids]
         for k in stale_zone_keys:
             del self.zone_entry_since[k]
+
+        stale_fight_keys = [k for k in self.fight_candidate_since if k[0] not in active_ids or k[1] not in active_ids]
+        for k in stale_fight_keys:
+            self.fight_candidate_since.pop(k, None)
+            self.fight_last_alert_at.pop(k, None)
 
         return anomalies

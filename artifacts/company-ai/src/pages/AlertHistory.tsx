@@ -18,6 +18,9 @@ interface AlertRecord {
     count?: number;
     duration?: number;
     avg_speed?: number;
+    avg_pair_speed?: number;
+    distance?: number;
+    track_ids?: number[];
     aspect_ratio?: number;
     owner_absent?: number;
     zone_id?: string;
@@ -33,6 +36,7 @@ interface AlertRecord {
 
 const TYPE_META: Record<string, { color: string; Icon: typeof Zap; label: string; severity: string }> = {
   running:           { color: "#a855f7", Icon: Zap,         label: "Running",            severity: "CRITICAL" },
+  fight_suspected:   { color: "#f43f5e", Icon: AlertCircle, label: "Fight Suspected",    severity: "CRITICAL" },
   unattended_object: { color: "#ef4444", Icon: AlertCircle, label: "Unattended Object",  severity: "HIGH" },
   overcrowding:      { color: "#f97316", Icon: Users,       label: "Overcrowding",       severity: "MEDIUM" },
   fall_detected:     { color: "#dc2626", Icon: UserRoundX,  label: "Fall Detected",      severity: "HIGH" },
@@ -43,6 +47,7 @@ const TYPE_META: Record<string, { color: string; Icon: typeof Zap; label: string
 const FILTER_OPTIONS = [
   "all",
   "running",
+  "fight_suspected",
   "unattended_object",
   "overcrowding",
   "fall_detected",
@@ -53,6 +58,7 @@ const FILTER_OPTIONS = [
 interface ChartBucket {
   time: string;
   running: number;
+  fight_suspected: number;
   unattended_object: number;
   overcrowding: number;
   fall_detected: number;
@@ -67,8 +73,11 @@ function exportCSV(alerts: AlertRecord[]) {
     "Type",
     "Severity",
     "Track ID",
+    "Track Pair",
     "Count",
     "Speed (px/f)",
+    "Pair Speed (px/f)",
+    "Pair Distance (px)",
     "Duration (s)",
     "Aspect Ratio",
     "Zone",
@@ -86,8 +95,11 @@ function exportCSV(alerts: AlertRecord[]) {
       meta?.label ?? record.anomaly.type,
       meta?.severity ?? "INFO",
       record.anomaly.track_id ?? "",
+      record.anomaly.track_ids ? record.anomaly.track_ids.join("-") : "",
       record.anomaly.count ?? "",
       record.anomaly.avg_speed ?? "",
+      record.anomaly.avg_pair_speed ?? "",
+      record.anomaly.distance ?? "",
       record.anomaly.duration ?? "",
       record.anomaly.aspect_ratio ?? "",
       record.anomaly.zone_name ?? record.anomaly.zone_id ?? "",
@@ -124,6 +136,7 @@ function buildChartData(alerts: AlertRecord[]): ChartBucket[] {
     buckets[label] = {
       time: label,
       running: 0,
+      fight_suspected: 0,
       unattended_object: 0,
       overcrowding: 0,
       fall_detected: 0,
@@ -155,8 +168,13 @@ function buildChartData(alerts: AlertRecord[]): ChartBucket[] {
 function renderDetails(record: AlertRecord): string {
   const parts: string[] = [];
   if (record.anomaly.track_id !== undefined) parts.push(`Track #${record.anomaly.track_id}`);
+  if (record.anomaly.track_ids && record.anomaly.track_ids.length >= 2) {
+    parts.push(`Pair #${record.anomaly.track_ids[0]} & #${record.anomaly.track_ids[1]}`);
+  }
   if (record.anomaly.count !== undefined) parts.push(`${record.anomaly.count} people`);
   if (record.anomaly.avg_speed !== undefined) parts.push(`${record.anomaly.avg_speed} px/f`);
+  if (record.anomaly.avg_pair_speed !== undefined) parts.push(`${record.anomaly.avg_pair_speed} pair px/f`);
+  if (record.anomaly.distance !== undefined) parts.push(`${record.anomaly.distance}px apart`);
   if (record.anomaly.duration !== undefined) parts.push(`${record.anomaly.duration}s`);
   if (record.anomaly.aspect_ratio !== undefined) parts.push(`ratio ${record.anomaly.aspect_ratio}`);
   if (record.anomaly.owner_absent !== undefined) parts.push(`away ${record.anomaly.owner_absent}s`);
@@ -330,6 +348,7 @@ export default function AlertHistory() {
           </div>
           {chartData.every((d) => (
             d.running === 0
+            && d.fight_suspected === 0
             && d.unattended_object === 0
             && d.overcrowding === 0
             && d.fall_detected === 0
@@ -355,6 +374,7 @@ export default function AlertHistory() {
                 />
                 <Legend wrapperStyle={{ fontSize: 11, color: "#64748b" }} />
                 <Bar dataKey="running" name="Running" fill="#a855f7" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="fight_suspected" name="Fight Suspected" fill="#f43f5e" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="unattended_object" name="Unattended Object" fill="#ef4444" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="overcrowding" name="Overcrowding" fill="#f97316" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="fall_detected" name="Fall Detected" fill="#dc2626" radius={[3, 3, 0, 0]} />

@@ -14,11 +14,17 @@ export interface Track {
 }
 
 export interface Anomaly {
-  type: "running" | "unattended_object" | "overcrowding";
+  type: "running" | "unattended_object" | "overcrowding" | "fall_detected" | "restricted_zone" | "fight_suspected";
   track_id?: number;
+  track_ids?: number[];
   count?: number;
   duration?: number;
   avg_speed?: number;
+  avg_pair_speed?: number;
+  distance?: number;
+  aspect_ratio?: number;
+  zone_id?: string;
+  zone_name?: string;
   position: [number, number] | null;
 }
 
@@ -49,8 +55,10 @@ export function useSimulation() {
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shouldReconnectRef = useRef(true);
 
   const connect = useCallback(() => {
+    if (!shouldReconnectRef.current) return;
     try {
       const ws = new WebSocket(getWsUrl());
       wsRef.current = ws;
@@ -69,6 +77,7 @@ export function useSimulation() {
 
       ws.onclose = () => {
         setConnected(false);
+        if (!shouldReconnectRef.current) return;
         reconnectRef.current = setTimeout(connect, 2000);
       };
 
@@ -76,14 +85,21 @@ export function useSimulation() {
         ws.close();
       };
     } catch {
+      if (!shouldReconnectRef.current) return;
       reconnectRef.current = setTimeout(connect, 2000);
     }
   }, []);
 
   useEffect(() => {
+    shouldReconnectRef.current = true;
     connect();
     return () => {
+      shouldReconnectRef.current = false;
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+      }
       wsRef.current?.close();
     };
   }, [connect]);

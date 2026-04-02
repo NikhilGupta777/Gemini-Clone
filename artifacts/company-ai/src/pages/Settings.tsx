@@ -22,19 +22,29 @@ interface Config {
   fall_persistence_time: number;
   restricted_zone_enabled: boolean;
   restricted_zone_min_dwell: number;
+  fight_detection_enabled: boolean;
+  fight_proximity_px: number;
+  fight_min_pair_speed: number;
+  fight_persistence_time: number;
+  fight_min_hit_streak: number;
 }
 
 const DEFAULT_CONFIG: Config = {
-  overcrowding_threshold: 2,
+  overcrowding_threshold: 4,
   running_speed_threshold: 20,
   unattended_object_time: 5,
   stationary_threshold: 150,
   unattended_owner_proximity_px: 180,
   unattended_owner_grace_time: 2.0,
-  fall_aspect_ratio_threshold: 1.25,
+  fall_aspect_ratio_threshold: 1.45,
   fall_persistence_time: 1.0,
   restricted_zone_enabled: true,
   restricted_zone_min_dwell: 0.6,
+  fight_detection_enabled: true,
+  fight_proximity_px: 180,
+  fight_min_pair_speed: 16,
+  fight_persistence_time: 0.8,
+  fight_min_hit_streak: 3,
 };
 
 const COCO_CLASSES = [
@@ -461,6 +471,79 @@ export default function Settings() {
         </div>
       </div>
 
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+        <div
+          style={{
+            background: "rgba(255,255,255,0.025)",
+            border: "1px solid rgba(255,255,255,0.07)",
+            borderRadius: 14,
+            padding: 24,
+          }}
+        >
+          <div style={{ fontSize: 9, color: "#475569", letterSpacing: 2, fontWeight: 700, marginBottom: 24 }}>
+            FIGHT PROTOTYPE
+          </div>
+
+          <ToggleCard
+            label="Fight Suspicion Monitoring"
+            description="Heuristic pair-motion detector for close high-speed person interactions."
+            enabled={config.fight_detection_enabled}
+            onToggle={(next) => setConfig((c) => ({ ...c, fight_detection_enabled: next }))}
+          />
+
+          <PremiumSlider
+            label="Fight Pair Proximity"
+            description="Maximum distance between two persons to consider a possible fight pair."
+            icon={Users}
+            color="#f43f5e"
+            value={config.fight_proximity_px}
+            min={60}
+            max={320}
+            step={10}
+            onChange={(v) => setConfig((c) => ({ ...c, fight_proximity_px: v }))}
+            unit=" px"
+          />
+
+          <PremiumSlider
+            label="Fight Pair Speed"
+            description="Both persons must exceed this average speed for suspicion."
+            icon={Zap}
+            color="#f43f5e"
+            value={config.fight_min_pair_speed}
+            min={6}
+            max={80}
+            step={1}
+            onChange={(v) => setConfig((c) => ({ ...c, fight_min_pair_speed: v }))}
+            unit=" px/f"
+          />
+
+          <PremiumSlider
+            label="Fight Persistence"
+            description="How long suspicious pair behavior must continue before alert."
+            icon={Clock}
+            color="#f43f5e"
+            value={config.fight_persistence_time}
+            min={0.2}
+            max={5}
+            step={0.1}
+            onChange={(v) => setConfig((c) => ({ ...c, fight_persistence_time: Number(v.toFixed(1)) }))}
+            unit=" s"
+          />
+
+          <PremiumSlider
+            label="Fight Min Track Stability"
+            description="Minimum tracker hit-streak for each person before pair evaluation."
+            icon={CheckCircle}
+            color="#f43f5e"
+            value={config.fight_min_hit_streak}
+            min={1}
+            max={10}
+            step={1}
+            onChange={(v) => setConfig((c) => ({ ...c, fight_min_hit_streak: v }))}
+          />
+        </div>
+      </div>
+
       <div
         style={{
           background: "rgba(255,255,255,0.025)",
@@ -525,8 +608,8 @@ export default function Settings() {
         </div>
 
         <div style={{ fontSize: 11, color: "#1e3a5f", marginTop: 14 }}>
-          Person and unattended-object classes are tracked by YOLOv8n plus SORT. New fall and restricted-zone
-          settings are active immediately after applying this configuration.
+          Person and unattended-object classes are tracked by YOLOv8n plus SORT. Fall, restricted-zone, and
+          fight-suspicion prototype settings are active immediately after applying this configuration.
         </div>
       </div>
     </div>

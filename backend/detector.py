@@ -3,21 +3,26 @@ YOLOv8 Detection Module
 Uses ultralytics YOLOv8n - matches the original project detection.py exactly.
 Model: yolov8n.pt (6.3 MB, auto-downloaded on first run)
 """
+
 import os
 import threading
+
 import numpy as np
+import torch
 
 # Point ultralytics settings to /tmp so it doesn't try to write to read-only dirs
 os.environ.setdefault("YOLO_CONFIG_DIR", "/tmp/Ultralytics")
 
-from backend.config import CONFIDENCE_THRESHOLD, COCO_CLASSES
+from backend.config import COCO_CLASSES, CONFIDENCE_THRESHOLD, YOLO_MODEL
 
-MODEL_PATH = "yolov8n.pt"          # relative to workspace root (uvicorn cwd)
+# relative to workspace root (uvicorn cwd)
+MODEL_PATH = YOLO_MODEL
 TARGET_CLASSES = set(COCO_CLASSES.keys())
 
 _model = None
 _model_ready = False
 _model_error: str | None = None
+_model_device = "cpu"
 _lock = threading.Lock()
 
 
@@ -31,17 +36,29 @@ def get_model_error() -> str | None:
 
 def _download_model():
     """Load (and auto-download) the YOLOv8n model. Runs in a background thread."""
-    global _model, _model_ready, _model_error
+    global _model, _model_ready, _model_error, _model_device
     try:
         from ultralytics import YOLO
-        print("[detector] Loading YOLOv8n model (ultralytics)…")
-        model = YOLO(MODEL_PATH)          # downloads automatically if not present
+
+        _model_device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        use_half = _model_device.startswith("cuda")
+        print(f"[detector] Loading {MODEL_PATH} (ultralytics) on {_model_device}...")
+        model = YOLO(MODEL_PATH)  # downloads automatically if not present
+        model.to(_model_device)
+
         # Warm-up inference to compile kernels
         dummy = np.zeros((640, 640, 3), dtype=np.uint8)
-        model(dummy, conf=CONFIDENCE_THRESHOLD, verbose=False)
+        model(
+            dummy,
+            conf=CONFIDENCE_THRESHOLD,
+            verbose=False,
+            device=_model_device,
+            half=use_half,
+        )
+
         _model = model
         _model_ready = True
-        print("[detector] YOLOv8n model ready.")
+        print(f"[detector] {MODEL_PATH} ready on {_model_device}.")
     except Exception as e:
         _model_error = str(e)
         print(f"[detector] Model error: {e}")
@@ -55,9 +72,9 @@ class YOLOv8Detector:
 
     def __init__(self):
         if not _model_ready:
-            raise RuntimeError("YOLOv8n model not ready yet — wait for download")
+            raise RuntimeError("YOLOv8n model not ready yet - wait for download")
 
-    def detect(self, frame: np.ndarray) -> list[dict]:
+    def detect(self, frame: np.ndarray, conf_override: float | None = None) -> list[dict]:
         """
         Run YOLOv8n inference on a BGR frame.
 
@@ -67,8 +84,16 @@ class YOLOv8Detector:
         Returns:
             List of dicts: [{"bbox": [x1,y1,x2,y2], "class_id": int, "confidence": float}]
         """
+        conf = CONFIDENCE_THRESHOLD if conf_override is None else conf_override
+        use_half = _model_device.startswith("cuda")
         with _lock:
-            results = _model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)[0]
+            results = _model(
+                frame,
+                conf=conf,
+                verbose=False,
+                device=_model_device,
+                half=use_half,
+            )[0]
 
         detections = []
         for box in results.boxes:
@@ -80,9 +105,11 @@ class YOLOv8Detector:
             if class_id not in TARGET_CLASSES:
                 continue
 
-            detections.append({
-                "bbox": [float(x1), float(y1), float(x2), float(y2)],
-                "confidence": round(confidence, 3),
-                "class_id": class_id,
-            })
+            detections.append(
+                {
+                    "bbox": [float(x1), float(y1), float(x2), float(y2)],
+                    "confidence": round(confidence, 3),
+                    "class_id": class_id,
+                }
+            )
         return detections
