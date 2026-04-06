@@ -19,12 +19,7 @@ run = "pnpm --filter @workspace/company-ai run dev"
 
 [services.production]
 build = [ "pnpm", "--filter", "@workspace/company-ai", "run", "build" ]
-publicDir = "artifacts/company-ai/dist/public"
-serve = "static"
-
-[[services.production.rewrites]]
-from = "/*"
-to = "/index.html"
+run = "uv run uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
 
 [services.env]
 PORT = "3000"

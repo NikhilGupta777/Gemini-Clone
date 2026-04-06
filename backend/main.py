@@ -1435,3 +1435,14 @@ async def webcam_ws(websocket: WebSocket):
     except WebSocketDisconnect:
         print("[ws/cam] Webcam client disconnected")
 
+
+# ─── SPA static file serving (production) ─────────────────────────────────────
+
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+
+_static_dir = Path(__file__).parent.parent / "artifacts" / "company-ai" / "dist" / "public"
+
+if _static_dir.exists():
+    app.mount("/", StaticFiles(directory=str(_static_dir), html=True), name="spa")
+
