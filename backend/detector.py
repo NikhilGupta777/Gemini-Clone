@@ -1,8 +1,7 @@
 """
-YOLO11n Detection Module
-At startup, exports YOLO11n to ONNX format and reloads via ONNX Runtime —
-2-3x faster CPU inference with identical accuracy. Falls back to the .pt
-model automatically if the export fails.
+YOLO11m Detection Module
+Loads YOLO11m and runs inference via ONNX Runtime (preferred) or PyTorch.
+Includes robust GPU/CPU fallback to handle driver mismatches gracefully.
 """
 
 import os
@@ -15,8 +14,8 @@ os.environ.setdefault("YOLO_CONFIG_DIR", "/tmp/Ultralytics")
 
 from backend.config import COCO_CLASSES, CONFIDENCE_THRESHOLD, YOLO_MODEL
 
-MODEL_PATH     = YOLO_MODEL                           # e.g. "yolo11n.pt"
-ONNX_PATH      = MODEL_PATH.replace(".pt", ".onnx")   # e.g. "yolo11n.onnx"
+MODEL_PATH     = YOLO_MODEL                           # e.g. "yolo11m.pt"
+ONNX_PATH      = MODEL_PATH.replace(".pt", ".onnx")   # e.g. "yolo11m.onnx"
 TARGET_CLASSES = set(COCO_CLASSES.keys())
 
 _model        = None
@@ -34,19 +33,39 @@ def get_model_error() -> str | None:
     return _model_error
 
 
+def _try_warmup(model, label: str, device: str | None = None):
+    """Run a single warm-up inference. Returns True on success."""
+    dummy = np.zeros((640, 640, 3), dtype=np.uint8)
+    kwargs = dict(conf=CONFIDENCE_THRESHOLD, verbose=False)
+    if device:
+        kwargs["device"] = device
+    model(dummy, **kwargs)
+    print(f"[detector] Warm-up OK → {label}")
+    return True
+
+
 def _download_model():
     """
-    Load YOLO11n, export once to ONNX, then reload via ONNX Runtime.
-    Falls back to the .pt model if ONNX export fails for any reason.
+    Load YOLO11m, export to ONNX once, then reload via ONNX Runtime.
+    Falls back through multiple strategies if GPU or ONNX fails:
+      1. ONNX + GPU  (fastest)
+      2. ONNX + CPU  (fast, portable)
+      3. PyTorch + GPU
+      4. PyTorch + CPU (slowest, always works)
     Runs in a background thread at startup.
     """
     global _model, _model_ready, _model_error, _model_device
     try:
         from ultralytics import YOLO
 
-        _model_device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        has_cuda = torch.cuda.is_available()
+        if has_cuda:
+            gpu_name = torch.cuda.get_device_name(0)
+            print(f"[detector] CUDA available — {gpu_name}")
+        else:
+            print("[detector] CUDA not available — will use CPU")
 
-        # ── Try ONNX (fast path) ──────────────────────────────────────────────
+        # ── Export to ONNX if not already done ─────────────────────────────────
         if not os.path.exists(ONNX_PATH):
             print(f"[detector] Exporting {MODEL_PATH} → {ONNX_PATH} (one-time ~30 s)…")
             try:
@@ -59,48 +78,83 @@ def _download_model():
                 )
                 print(f"[detector] Export complete → {ONNX_PATH}")
             except Exception as export_err:
-                print(f"[detector] ONNX export failed ({export_err}); falling back to .pt")
+                print(f"[detector] ONNX export failed ({export_err}); will use .pt directly")
                 if os.path.exists(ONNX_PATH):
-                    os.remove(ONNX_PATH)   # remove partial file
+                    os.remove(ONNX_PATH)
 
+        # ── Strategy 1: ONNX Runtime (try GPU then CPU) ───────────────────────
         if os.path.exists(ONNX_PATH):
             print(f"[detector] Loading {ONNX_PATH} via ONNX Runtime…")
-            model = YOLO(ONNX_PATH)
-            backend_label = "ONNX Runtime"
-        else:
-            print(f"[detector] Loading {MODEL_PATH} (PyTorch fallback)…")
-            model = YOLO(MODEL_PATH)
-            model.to(_model_device)
-            backend_label = f"PyTorch on {_model_device}"
+            try:
+                model = YOLO(ONNX_PATH)
 
-        # Warm-up
-        dummy = np.zeros((640, 640, 3), dtype=np.uint8)
-        model(dummy, conf=CONFIDENCE_THRESHOLD, verbose=False)
+                # Try GPU-accelerated ONNX first
+                if has_cuda:
+                    try:
+                        _try_warmup(model, "ONNX Runtime + GPU", device="0")
+                        _model = model
+                        _model_device = "cuda:0"
+                        _model_ready = True
+                        print("[detector] ✓ Model ready via ONNX Runtime (GPU).")
+                        return
+                    except Exception as gpu_err:
+                        print(f"[detector] ONNX GPU failed ({gpu_err}); trying ONNX CPU…")
 
+                # Try CPU ONNX
+                _try_warmup(model, "ONNX Runtime + CPU", device="cpu")
+                _model = model
+                _model_device = "cpu"
+                _model_ready = True
+                print("[detector] ✓ Model ready via ONNX Runtime (CPU).")
+                return
+            except Exception as onnx_err:
+                print(f"[detector] ONNX Runtime failed entirely ({onnx_err}); falling back to PyTorch")
+
+        # ── Strategy 2: PyTorch (try GPU then CPU) ────────────────────────────
+        print(f"[detector] Loading {MODEL_PATH} via PyTorch…")
+        model = YOLO(MODEL_PATH)
+
+        if has_cuda:
+            try:
+                model.to("cuda:0")
+                _try_warmup(model, "PyTorch + GPU", device="0")
+                _model = model
+                _model_device = "cuda:0"
+                _model_ready = True
+                print("[detector] ✓ Model ready via PyTorch (GPU).")
+                return
+            except Exception as pt_gpu_err:
+                print(f"[detector] PyTorch GPU failed ({pt_gpu_err}); using CPU…")
+
+        model.to("cpu")
+        _try_warmup(model, "PyTorch + CPU", device="cpu")
         _model = model
+        _model_device = "cpu"
         _model_ready = True
-        print(f"[detector] Model ready via {backend_label}.")
+        print("[detector] ✓ Model ready via PyTorch (CPU).")
+
     except Exception as e:
         _model_error = str(e)
         print(f"[detector] Fatal model error: {e}")
 
 
 class YOLOv8Detector:
-    """YOLO11n detector — ONNX Runtime on CPU (falls back to PyTorch if needed)."""
+    """YOLO11m detector — uses best available backend (ONNX/PyTorch, GPU/CPU)."""
 
     def __init__(self):
         if not _model_ready:
-            raise RuntimeError("YOLO11n model not ready yet — wait for startup")
+            raise RuntimeError("YOLO11m model not ready yet — wait for startup")
 
     def detect(self, frame: np.ndarray, conf_override: float | None = None) -> list[dict]:
         """
-        Run YOLO11n inference on a BGR frame.
+        Run YOLO11m inference on a BGR frame.
 
         Args:
             frame: numpy array (H × W × 3, BGR)
 
         Returns:
-            list of {"bbox": [x1,y1,x2,y2], "class_id": int, "confidence": float}
+            list of {"bbox": [x1,y1,x2,y2], "class_id": int, "confidence": float,
+                      "class_name": str}
         """
         conf = CONFIDENCE_THRESHOLD if conf_override is None else conf_override
         with _lock:
@@ -119,5 +173,6 @@ class YOLOv8Detector:
                 "bbox":       [float(x1), float(y1), float(x2), float(y2)],
                 "confidence": round(confidence, 3),
                 "class_id":   class_id,
+                "class_name": COCO_CLASSES.get(class_id, "unknown"),
             })
         return detections

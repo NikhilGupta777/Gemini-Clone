@@ -1,20 +1,20 @@
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
 
-# YOLO11n — Ultralytics' newest architecture. Better accuracy and speed than
-# YOLOv8n at the same model size. Auto-downloaded on first run.
-YOLO_MODEL = "yolo11n.pt"
+# YOLO11m — Stepping up to the medium architecture for deep crowd analysis.
+# Slightly more compute but captures distant and occluded objects accurately.
+YOLO_MODEL = "yolo11m.pt"
 CONFIDENCE_THRESHOLD = 0.25
 
 # Inference resolution for video / webcam modes.
 # YOLO was trained at 640px; running at native 640x360 avoids the internal
 # downsample from 1280x720, roughly halving inference time.
-INFER_WIDTH = 640
-INFER_HEIGHT = 360
+INFER_WIDTH = 1280
+INFER_HEIGHT = 720
 
 # Stream mode tuning:
-STREAM_FRAME_WIDTH = 640
-STREAM_FRAME_HEIGHT = 360
+STREAM_FRAME_WIDTH = 1280
+STREAM_FRAME_HEIGHT = 720
 STREAM_TARGET_FPS = 12
 STREAM_DETECTION_CONFIDENCE = 0.25
 
@@ -23,15 +23,14 @@ VIDEO_DETECTION_CONFIDENCE = 0.28
 WEBCAM_DETECTION_CONFIDENCE = 0.28
 
 # Tracker confirmation policy.
-# 2 = require 2 consecutive hits before showing a track (reduces flicker while
-# staying responsive).
-TRACKER_MIN_HITS = 2
+# 1 = show tracks immediately (better for fast occlusion recovery).
+TRACKER_MIN_HITS = 1
 
 # SORT tracker tuning.
 # Higher max_age keeps IDs alive through brief occlusions (crowded scenes).
 # Lower IOU threshold accepts larger positional shifts between frames.
 MAX_AGE = 30
-MIN_HITS = 2
+MIN_HITS = 1
 IOU_THRESHOLD = 0.25
 
 # Anomaly detection settings
@@ -62,8 +61,10 @@ RESTRICTED_ZONES = [
     {"id": "RZ1", "name": "Restricted Zone A", "x1": 920, "y1": 80, "x2": 1240, "y2": 520},
 ]
 
-# Classes we track (person + unattended objects)
+# Classes we track (person, animals, vehicles + unattended objects)
 COCO_CLASSES = {
-    0: "person", 24: "backpack", 26: "handbag", 28: "suitcase",
+    0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck",
+    15: "cat", 16: "dog", 17: "horse", 18: "sheep", 19: "cow",
+    24: "backpack", 26: "handbag", 28: "suitcase",
     39: "bottle", 41: "cup", 67: "cell phone", 73: "book"
 }

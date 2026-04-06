@@ -47,3 +47,18 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Python
+**/__pycache__/
+*.pyc
+
+# ML Models
+*.pt
+*.onnx
+
+# Application Data
+backend/archive/
+backend/*.db
+backend/*.db-journal
+crowdlens_upload.mp4
+
