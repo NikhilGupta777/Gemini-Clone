@@ -73,6 +73,7 @@ export default function Dashboard() {
 
   const [videoStatus, setVideoStatus] = useState<VideoStatusData | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
@@ -223,20 +224,55 @@ export default function Dashboard() {
 
   // ── Video upload ─────────────────────────────────────────────────────────────
 
-  const handleFileUpload = async (file: File) => {
+  const handleFileUpload = (file: File) => {
+    const MAX_MB = 500;
+    if (file.size > MAX_MB * 1024 * 1024) {
+      setUploadError(`File is too large (${(file.size / 1e6).toFixed(0)} MB). Max is ${MAX_MB} MB.`);
+      return;
+    }
+
     setUploading(true);
+    setUploadProgress(0);
     setUploadError(null);
+
     const form = new FormData();
     form.append("file", file);
-    try {
-      const res = await fetch("/api/video/upload", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail ?? "Upload failed");
-    } catch (e: unknown) {
-      setUploadError(e instanceof Error ? e.message : "Upload failed");
-    } finally {
+
+    const xhr = new XMLHttpRequest();
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        setUploadProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    });
+
+    xhr.addEventListener("load", () => {
       setUploading(false);
-    }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        setUploadProgress(100);
+      } else {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          setUploadError(data.detail ?? `Upload failed (HTTP ${xhr.status})`);
+        } catch {
+          setUploadError(`Upload failed (HTTP ${xhr.status})`);
+        }
+      }
+    });
+
+    xhr.addEventListener("error", () => {
+      setUploading(false);
+      setUploadError("Network error — upload could not reach the server. Check your connection.");
+    });
+
+    xhr.addEventListener("timeout", () => {
+      setUploading(false);
+      setUploadError("Upload timed out. The file may be too large for the current connection.");
+    });
+
+    xhr.open("POST", "/api/video/upload");
+    xhr.timeout = 10 * 60 * 1000; // 10 minute timeout
+    xhr.send(form);
   };
 
   const startVideoProcessing = async () => {
