@@ -29,7 +29,8 @@ from backend.config import (
     STREAM_FRAME_WIDTH, STREAM_FRAME_HEIGHT,
     STREAM_TARGET_FPS, STREAM_DETECTION_CONFIDENCE,
     VIDEO_DETECTION_CONFIDENCE, WEBCAM_DETECTION_CONFIDENCE,
-    TRACKER_MIN_HITS,
+    TRACKER_MIN_HITS, INFER_WIDTH, INFER_HEIGHT,
+    MAX_AGE, IOU_THRESHOLD,
 )
 from backend.detector import _download_model, is_model_ready, get_model_error
 
@@ -332,7 +333,7 @@ async def video_processing_loop():
 
     try:
         detector = YOLOv8Detector()
-        tracker = Sort(max_age=6, min_hits=TRACKER_MIN_HITS, iou_threshold=0.3)
+        tracker = Sort(max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD)
         _video_anomaly_detector = AnomalyDetector()
     except Exception as e:
         video_status["error"] = f"Detector init failed: {e}"
@@ -397,14 +398,14 @@ async def video_processing_loop():
             if wait > 0.001:
                 await asyncio.sleep(wait)
 
-            frame_resized = cv2.resize(frame, (1280, 720))
+            frame_resized = cv2.resize(frame, (INFER_WIDTH, INFER_HEIGHT))
 
             # Run YOLO in thread pool — keeps the asyncio event loop responsive
             detections = await loop.run_in_executor(None, _detect_sync, frame_resized)
             raw_tracks = tracker.update(detections)
 
             now = time.time()
-            tracks = _build_tracks_from_yolo(raw_tracks, 1280, 720)
+            tracks = _build_tracks_from_yolo(raw_tracks, INFER_WIDTH, INFER_HEIGHT)
             anomalies = _video_anomaly_detector.update(tracks, now)
             tracks = _finalize_tracks(tracks, anomalies)
 
@@ -456,7 +457,7 @@ async def stream_processing_loop(url: str):
 
     try:
         detector = YOLOv8Detector()
-        tracker = Sort(max_age=8, min_hits=TRACKER_MIN_HITS, iou_threshold=0.3)
+        tracker = Sort(max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD)
         _video_anomaly_detector = AnomalyDetector()
     except Exception as e:
         stream_status["error"] = f"Detector init failed: {e}"
@@ -652,7 +653,7 @@ async def stream_processing_loop(url: str):
                         downloaded_file_path = await loop.run_in_executor(None, _download_http_file, url)
                         source_input = downloaded_file_path
                         print(f"[stream] Download fallback ready: {downloaded_file_path}")
-                        tracker = Sort(max_age=8, min_hits=TRACKER_MIN_HITS, iou_threshold=0.3)
+                        tracker = Sort(max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD)
                         _video_anomaly_detector = AnomalyDetector()
                         frames_processed = 0
                         proc = await loop.run_in_executor(None, _start_proc)
@@ -708,7 +709,7 @@ async def stream_processing_loop(url: str):
 
                 # Had frames and source ended (e.g. finite HTTP MP4) -> loop automatically.
                 print(f"[stream] Video ended after {frames_processed} frames; looping")
-                tracker = Sort(max_age=8, min_hits=TRACKER_MIN_HITS, iou_threshold=0.3)
+                tracker = Sort(max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD)
                 _video_anomaly_detector = AnomalyDetector()
                 frames_processed = 0
                 proc = await loop.run_in_executor(None, _start_proc)
@@ -776,7 +777,7 @@ async def webcam_processing_loop():
 
     try:
         detector = YOLOv8Detector()
-        tracker = Sort(max_age=6, min_hits=TRACKER_MIN_HITS, iou_threshold=0.3)
+        tracker = Sort(max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD)
         anomaly_detector = AnomalyDetector()
     except Exception as e:
         webcam_status["error"] = f"Detector init failed: {e}"
@@ -804,12 +805,12 @@ async def webcam_processing_loop():
             if frame is None:
                 continue
 
-            frame = cv2.resize(frame, (1280, 720))
+            frame = cv2.resize(frame, (INFER_WIDTH, INFER_HEIGHT))
             detections = detector.detect(frame, conf_override=WEBCAM_DETECTION_CONFIDENCE)
             raw_tracks = tracker.update(detections)
 
             now = time.time()
-            tracks = _build_tracks_from_yolo(raw_tracks, 1280, 720)
+            tracks = _build_tracks_from_yolo(raw_tracks, INFER_WIDTH, INFER_HEIGHT)
             anomalies = anomaly_detector.update(tracks, now)
             tracks = _finalize_tracks(tracks, anomalies)
 
