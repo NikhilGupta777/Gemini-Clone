@@ -4,6 +4,7 @@ import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import AlertHistory from "./pages/AlertHistory";
 import Settings from "./pages/Settings";
+import AIPanel from "./pages/AIPanel";
 
 function getThreatLevel(anomalyCount: number, types: string[]): "secure" | "warning" | "critical" {
   if (anomalyCount === 0) return "secure";
@@ -21,6 +22,7 @@ function AppShell() {
       <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/history" component={AlertHistory} />
+        <Route path="/ai" component={AIPanel} />
         <Route path="/settings" component={Settings} />
         <Route>
           <div style={{ color: "#64748b", padding: 40 }}>Page not found</div>

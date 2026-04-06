@@ -1232,6 +1232,177 @@ async def test_feed():
     )
 
 
+# ─── AI Assistant routes ───────────────────────────────────────────────────────
+
+def _make_openai_client():
+    import openai as _openai
+    base_url = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
+    api_key  = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY", "dummy")
+    if base_url:
+        return _openai.OpenAI(base_url=base_url, api_key=api_key)
+    return _openai.OpenAI(api_key=api_key)
+
+
+class AIReportRequest(BaseModel):
+    alert: dict
+
+
+class AIChatRequest(BaseModel):
+    messages: list[dict]
+    alert_history: list[dict] = []
+
+
+class AINarrateRequest(BaseModel):
+    tracks: list[dict] = []
+    anomalies: list[dict] = []
+    person_count: int = 0
+    object_count: int = 0
+    source_mode: str = "idle"
+
+
+def _format_alert_for_ai(alert: dict) -> str:
+    from datetime import datetime
+    a = alert.get("anomaly", {})
+    ts = alert.get("timestamp", 0)
+    t  = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S") if ts else "unknown"
+    parts = [f"Time: {t}", f"Type: {a.get('type', 'unknown')}", f"Source: {alert.get('source','live')}"]
+    if a.get("track_id") is not None:    parts.append(f"Track ID: #{a['track_id']}")
+    if a.get("track_ids"):               parts.append(f"Track Pair: #{a['track_ids'][0]} & #{a['track_ids'][1]}")
+    if a.get("count") is not None:       parts.append(f"People count: {a['count']}")
+    if a.get("avg_speed") is not None:   parts.append(f"Speed: {a['avg_speed']} px/frame")
+    if a.get("avg_pair_speed"):          parts.append(f"Pair speed: {a['avg_pair_speed']} px/frame")
+    if a.get("distance"):                parts.append(f"Distance between pair: {a['distance']} px")
+    if a.get("duration"):                parts.append(f"Duration: {a['duration']}s")
+    if a.get("zone_name"):               parts.append(f"Zone: {a['zone_name']}")
+    if a.get("position"):                parts.append(f"Position: {tuple(round(v) for v in a['position'])}")
+    if a.get("note"):                    parts.append(f"Note: {a['note']}")
+    return "\n".join(parts)
+
+
+@app.post("/api/ai/report")
+async def generate_ai_report(req: AIReportRequest):
+    """Generate a professional incident report for a single alert."""
+    try:
+        client = _make_openai_client()
+        alert_text = _format_alert_for_ai(req.alert)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            max_completion_tokens=512,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a professional security operations analyst for a campus AI monitoring system. "
+                        "Write concise, clear incident reports in plain English. "
+                        "Use a professional tone. Structure the report as: "
+                        "1) Incident Summary (2-3 sentences), "
+                        "2) Detection Details (bullet points), "
+                        "3) Recommended Action (1-2 sentences). "
+                        "Do not use markdown headers — use plain text with labels."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Generate an incident report for the following detection:\n\n{alert_text}",
+                },
+            ],
+        )
+        report = response.choices[0].message.content or ""
+        return {"report": report}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(req: AIChatRequest):
+    """Streaming SSE chat with the AI about alert history."""
+    async def stream():
+        try:
+            client = _make_openai_client()
+            history_text = ""
+            if req.alert_history:
+                lines = [_format_alert_for_ai(a) for a in req.alert_history[:50]]
+                history_text = "\n\n---\n\n".join(lines)
+
+            system_prompt = (
+                "You are an intelligent security assistant for CrowdLens, an AI-powered crowd monitoring system. "
+                "You help operators understand and analyse surveillance alert data. "
+                "Be concise, professional, and factual. "
+                "If you reference track IDs, quote them with #. "
+            )
+            if history_text:
+                system_prompt += f"\n\nCurrent alert history ({len(req.alert_history)} events):\n\n{history_text}"
+            else:
+                system_prompt += "\n\nNo alert history is available yet."
+
+            messages = [{"role": "system", "content": system_prompt}] + req.messages
+
+            stream_resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                max_completion_tokens=512,
+                messages=messages,
+                stream=True,
+            )
+            for chunk in stream_resp:
+                content = chunk.choices[0].delta.content if chunk.choices else None
+                if content:
+                    yield f"data: {json.dumps({'content': content})}\n\n"
+            yield f"data: {json.dumps({'done': True})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/ai/narrate")
+async def ai_narrate(req: AINarrateRequest):
+    """Generate a plain-English scene description from current detection data."""
+    try:
+        client = _make_openai_client()
+
+        track_lines = []
+        for t in req.tracks[:20]:
+            name = t.get("class_name", "person")
+            tid  = t.get("id", "?")
+            conf = t.get("confidence", 0)
+            run  = " (running)" if t.get("running") else ""
+            track_lines.append(f"  - Track #{tid}: {name}, conf={int(conf*100)}%{run}")
+
+        anomaly_lines = []
+        for a in req.anomalies[:10]:
+            anomaly_lines.append(f"  - {a.get('type','unknown')}: {a}")
+
+        scene_text = (
+            f"Source mode: {req.source_mode}\n"
+            f"People detected: {req.person_count}\n"
+            f"Objects detected: {req.object_count}\n"
+            f"Active tracks ({len(req.tracks)}):\n" + ("\n".join(track_lines) or "  none") + "\n"
+            f"Active anomalies ({len(req.anomalies)}):\n" + ("\n".join(anomaly_lines) or "  none")
+        )
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            max_completion_tokens=200,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a security analyst narrating a live surveillance scene for an operator. "
+                        "Write 2-4 sentences describing what is currently happening in the scene. "
+                        "Be specific about people counts, anomalies, and threat level. "
+                        "Keep it concise and clear — this is a live ops summary."
+                    ),
+                },
+                {"role": "user", "content": f"Describe this live scene:\n\n{scene_text}"},
+            ],
+        )
+        narration = response.choices[0].message.content or ""
+        return {"narration": narration}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ─── WebSocket: dashboard data broadcast ──────────────────────────────────────
 
 @app.websocket("/ws")

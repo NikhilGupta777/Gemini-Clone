@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { Link, useRoute } from "wouter";
 import {
   LayoutDashboard, History, Settings, Wifi, WifiOff,
-  Shield, ShieldAlert, ShieldX, Activity, Radio
+  Shield, ShieldAlert, ShieldX, Activity, Radio, Bot
 } from "lucide-react";
 
 interface Props {
@@ -12,9 +12,10 @@ interface Props {
 }
 
 const navItems = [
-  { path: "/", label: "Live Dashboard", icon: LayoutDashboard, exact: true },
-  { path: "/history", label: "Alert History", icon: History, exact: false },
-  { path: "/settings", label: "Settings", icon: Settings, exact: false },
+  { path: "/",        label: "Live Dashboard", icon: LayoutDashboard, exact: true },
+  { path: "/history", label: "Alert History",  icon: History,         exact: false },
+  { path: "/ai",      label: "AI Assistant",   icon: Bot,             exact: false },
+  { path: "/settings",label: "Settings",       icon: Settings,        exact: false },
 ];
 
 function NavItem({ path, label, icon: Icon, exact }: (typeof navItems)[0]) {
