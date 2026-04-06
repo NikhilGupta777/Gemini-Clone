@@ -344,25 +344,63 @@ async def video_processing_loop():
         return
 
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    native_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    native_fps = max(1.0, min(60.0, native_fps))
+    frame_interval = 1.0 / native_fps
+
     video_status["total_frames"] = total
     frame_num = 0
+    loop = asyncio.get_event_loop()
+
+    # Wall-clock anchor for playback pacing
+    playback_start = time.time()
+
+    def _detect_sync(f):
+        return detector.detect(f, conf_override=VIDEO_DETECTION_CONFIDENCE)
 
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
+                # Loop the video back to the start
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 frame_num = 0
                 tracker.reset()
                 _video_anomaly_detector = AnomalyDetector()
+                playback_start = time.time()
                 continue
 
             frame_num += 1
             video_status["current_frame"] = frame_num
             video_status["progress"] = round((frame_num / total * 100), 1) if total > 0 else 0
 
-            frame = cv2.resize(frame, (1280, 720))
-            detections = detector.detect(frame, conf_override=VIDEO_DETECTION_CONFIDENCE)
+            # Target wall-clock time for this frame based on native video FPS
+            target_time = playback_start + frame_num * frame_interval
+            now = time.time()
+            drift = now - target_time
+
+            # If we are running behind by more than one frame interval,
+            # skip this frame (grab-only, no decode cost) to catch up.
+            if drift > frame_interval:
+                frames_to_skip = min(int(drift / frame_interval), 15)
+                for _ in range(frames_to_skip):
+                    if not cap.grab():
+                        break
+                    frame_num += 1
+                video_status["current_frame"] = frame_num
+                video_status["progress"] = round((frame_num / total * 100), 1) if total > 0 else 0
+                await asyncio.sleep(0)
+                continue
+
+            # Wait until it is time to display this frame
+            wait = target_time - time.time()
+            if wait > 0.001:
+                await asyncio.sleep(wait)
+
+            frame_resized = cv2.resize(frame, (1280, 720))
+
+            # Run YOLO in thread pool — keeps the asyncio event loop responsive
+            detections = await loop.run_in_executor(None, _detect_sync, frame_resized)
             raw_tracks = tracker.update(detections)
 
             now = time.time()
@@ -371,13 +409,12 @@ async def video_processing_loop():
             tracks = _finalize_tracks(tracks, anomalies)
 
             payload = build_frame_payload(
-                tracks, anomalies, now, "video", frame_for_archive=frame
+                tracks, anomalies, now, "video", frame_for_archive=frame_resized
             )
-            payload["frame_jpeg"] = _encode_preview(frame)
+            payload["frame_jpeg"] = _encode_preview(frame_resized)
             if connected_clients:
                 await _broadcast(json.dumps(payload))
 
-            # Do not throttle prerecorded video processing; this avoids slow-motion playback.
             await asyncio.sleep(0)
 
     except asyncio.CancelledError:
