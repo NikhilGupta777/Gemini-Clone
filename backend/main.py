@@ -280,9 +280,18 @@ async def _cancel_active():
 
 
 def _build_tracks_from_yolo(raw_tracks: list, frame_width: int, frame_height: int) -> list:
+    # Scale bbox coordinates from inference resolution to the fixed 1280×720 canvas
+    # space so the frontend always receives consistent coordinates regardless of
+    # what resolution YOLO inference was run at.
+    scale_x = FRAME_WIDTH / max(1, frame_width)
+    scale_y = FRAME_HEIGHT / max(1, frame_height)
     tracks = []
     for t in raw_tracks:
-        x1, y1, x2, y2 = [max(0, int(v)) for v in t["bbox"]]
+        rx1, ry1, rx2, ry2 = t["bbox"]
+        x1 = max(0, int(rx1 * scale_x))
+        y1 = max(0, int(ry1 * scale_y))
+        x2 = min(FRAME_WIDTH,  int(rx2 * scale_x))
+        y2 = min(FRAME_HEIGHT, int(ry2 * scale_y))
         cx = (x1 + x2) / 2
         tracks.append({
             "id": t["id"],
@@ -291,10 +300,10 @@ def _build_tracks_from_yolo(raw_tracks: list, frame_width: int, frame_height: in
             "class_name": COCO_CLASSES.get(t["class_id"], "object"),
             "running": False,
             "confidence": round(t.get("confidence", 0), 2),
-            "zone": _get_zone(cx, frame_width),
+            "zone": _get_zone(cx, FRAME_WIDTH),
             "hit_streak": int(t.get("hit_streak", 0)),
-            "frame_width": frame_width,
-            "frame_height": frame_height,
+            "frame_width": FRAME_WIDTH,
+            "frame_height": FRAME_HEIGHT,
         })
     return tracks
 
