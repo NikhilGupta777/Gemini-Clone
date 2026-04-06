@@ -608,7 +608,7 @@ export default function Settings() {
         </div>
 
         <div style={{ fontSize: 11, color: "#1e3a5f", marginTop: 14 }}>
-          Person and unattended-object classes are tracked by YOLOv8n plus SORT. Fall, restricted-zone, and
+          Person and unattended-object classes are tracked by YOLO11n plus SORT. Fall, restricted-zone, and
           fight-suspicion prototype settings are active immediately after applying this configuration.
         </div>
       </div>
