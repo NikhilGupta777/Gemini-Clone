@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
 from backend.anomaly import AnomalyDetector
+import backend.database as _db
 from backend.config import (
     OVERCROWDING_THRESHOLD, RUNNING_SPEED_THRESHOLD,
     UNATTENDED_OBJECT_TIME, STATIONARY_THRESHOLD, COCO_CLASSES,
@@ -227,14 +228,16 @@ def build_frame_payload(
 
     for a in recordable_anomalies:
             _alert_id_counter += 1
-            alert_history.append({
+            entry = {
                 "id": _alert_id_counter,
                 "anomaly": a,
                 "timestamp": now,
                 "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
                 "source": effective_mode,
                 "snapshot_url": snapshot_url,
-            })
+            }
+            alert_history.append(entry)
+            threading.Thread(target=_db._insert_alert_sync, args=(entry,), daemon=True).start()
 
     return {
         "tracks": tracks,
@@ -842,6 +845,8 @@ async def webcam_processing_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _apply_config()
+    await _db.init_db()
+    _db.load_into_deque(alert_history)
     thread = threading.Thread(target=_download_model, daemon=True)
     thread.start()
     yield
@@ -879,11 +884,12 @@ def get_alert_history(limit: int = 200):
 
 
 @app.post("/api/alerts/clear")
-def clear_alert_history():
+async def clear_alert_history():
     global _alert_id_counter
     cleared = len(alert_history)
     alert_history.clear()
     _alert_id_counter = 0
+    await _db.clear_alerts()
     return {"success": True, "cleared": cleared}
 
 

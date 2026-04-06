@@ -8,8 +8,9 @@ import AlertsFeed from "../components/AlertsFeed";
 import {
   Camera, Monitor, Cpu, Users, Package,
   AlertTriangle, Activity, Upload, Video, StopCircle,
-  CheckCircle, Loader, Volume2, VolumeX, Radio, Link, X,
+  CheckCircle, Loader, Volume2, VolumeX, Radio, Link, X, Bell, BellOff,
 } from "lucide-react";
+import { useNotifications } from "../hooks/useNotifications";
 
 interface VideoStatusData {
   mode: string;
