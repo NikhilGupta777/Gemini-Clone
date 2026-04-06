@@ -94,6 +94,7 @@ export default function Dashboard() {
   const displayMode = (frame?.mode as SourceMode) ?? sourceMode;
 
   useAlertSound(anomalies, soundEnabled);
+  const { permission: notifPermission, enabled: notifEnabled, requestPermission } = useNotifications(anomalies);
 
   useCamProcessor(
     sourceMode === "webcam" ? videoElRef : null,
@@ -377,6 +378,30 @@ export default function Dashboard() {
             {soundEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
             {soundEnabled ? "Sound ON" : "Sound OFF"}
           </button>
+
+          {/* Browser push notifications toggle */}
+          {notifPermission !== "unsupported" && (
+            <button
+              onClick={requestPermission}
+              title={
+                notifPermission === "denied"
+                  ? "Notifications blocked — enable in browser settings"
+                  : notifEnabled
+                  ? "Disable push notifications"
+                  : "Enable push notifications"
+              }
+              style={{
+                display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8,
+                border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
+                color: notifEnabled ? "#f59e0b" : "#475569",
+                cursor: notifPermission === "denied" ? "not-allowed" : "pointer",
+                fontSize: 12, fontWeight: 600, opacity: notifPermission === "denied" ? 0.5 : 1,
+              }}
+            >
+              {notifEnabled ? <Bell size={14} /> : <BellOff size={14} />}
+              {notifEnabled ? "Alerts ON" : "Alerts OFF"}
+            </button>
+          )}
 
           {/* Webcam button */}
           {cameraError && (
