@@ -940,6 +940,167 @@ def get_archive_image(filename: str):
     return FileResponse(path, media_type="image/jpeg")
 
 
+# ─── AI Endpoints ─────────────────────────────────────────────────────────────
+
+def _get_openai_client():
+    """Build an OpenAI client pointed at the Replit AI Integrations proxy."""
+    import openai as _openai
+    base_url = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
+    api_key  = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY", "placeholder")
+    if not base_url:
+        raise HTTPException(503, "AI integration not configured")
+    return _openai.AsyncOpenAI(base_url=base_url, api_key=api_key)
+
+
+class AIChatRequest(BaseModel):
+    messages: list[dict]
+    alert_history: list[dict] = []
+
+
+class AIReportRequest(BaseModel):
+    alert: dict
+
+
+class AINarrateRequest(BaseModel):
+    tracks: list[dict] = []
+    anomalies: list[dict] = []
+    person_count: int = 0
+    object_count: int = 0
+    source_mode: str = "idle"
+
+
+_SYSTEM_PROMPT = """You are CrowdLens AI, an expert campus security analyst assistant.
+You have access to the alert history from the CrowdLens AI surveillance system.
+Your role is to analyse security events, identify patterns, and provide actionable insights.
+Be concise, professional, and security-focused. Format responses clearly."""
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(body: AIChatRequest):
+    """Streaming chat endpoint with alert history context."""
+    from fastapi.responses import StreamingResponse as _SR
+
+    client = _get_openai_client()
+
+    # Build context from alert history
+    history_lines = []
+    for a in body.alert_history[-30:]:
+        anomaly = a.get("anomaly", {})
+        atype = anomaly.get("type", "unknown")
+        ts = a.get("iso", "")
+        tid = anomaly.get("track_id")
+        history_lines.append(
+            f"- [{ts}] {atype}"
+            + (f" track#{tid}" if tid is not None else "")
+            + (f" count={anomaly.get('count')}" if anomaly.get("count") else "")
+        )
+
+    system_with_context = _SYSTEM_PROMPT
+    if history_lines:
+        system_with_context += (
+            "\n\nCurrent alert history (most recent 30 events):\n"
+            + "\n".join(history_lines)
+        )
+
+    chat_messages = [{"role": "system", "content": system_with_context}]
+    for m in body.messages:
+        if m.get("role") in ("user", "assistant") and m.get("content"):
+            chat_messages.append({"role": m["role"], "content": m["content"]})
+
+    async def _stream():
+        try:
+            stream = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=chat_messages,
+                stream=True,
+                max_tokens=1024,
+            )
+            async for chunk in stream:
+                content = chunk.choices[0].delta.content if chunk.choices else None
+                if content:
+                    yield f"data: {json.dumps({'content': content})}\n\n"
+            yield f"data: {json.dumps({'done': True})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return _SR(_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/ai/report")
+async def ai_report(body: AIReportRequest):
+    """Generate a structured incident report for a single alert."""
+    client = _get_openai_client()
+    alert = body.alert
+    anomaly = alert.get("anomaly", {})
+
+    prompt = f"""Generate a concise professional security incident report for this event:
+
+Event type: {anomaly.get('type', 'unknown')}
+Time: {alert.get('iso', 'unknown')}
+Source: {alert.get('source', 'unknown')}
+Track ID: {anomaly.get('track_id', 'N/A')}
+Person count: {anomaly.get('count', 'N/A')}
+Duration: {anomaly.get('duration', 'N/A')} seconds
+Speed: {anomaly.get('avg_speed', anomaly.get('avg_pair_speed', 'N/A'))} px/s
+Zone: {anomaly.get('zone_name', 'N/A')}
+Notes: {anomaly.get('note', 'None')}
+
+Format as:
+INCIDENT REPORT
+Time: ...
+Type: ...
+Description: (2-3 sentences describing what happened)
+Risk Level: (Low/Medium/High/Critical)
+Recommended Action: (1-2 sentences)"""
+
+    response = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=400,
+    )
+    report_text = response.choices[0].message.content or "Unable to generate report."
+    return {"report": report_text}
+
+
+@app.post("/api/ai/narrate")
+async def ai_narrate(body: AINarrateRequest):
+    """Narrate the current scene in natural language."""
+    client = _get_openai_client()
+
+    track_summary = []
+    for t in body.tracks[:10]:
+        name = t.get("class_name", "object")
+        zone = t.get("zone", "")
+        running = " (running)" if t.get("running") else ""
+        track_summary.append(f"{name} in zone {zone}{running}")
+
+    anomaly_summary = [a.get("type", "unknown") for a in body.anomalies]
+
+    prompt = f"""Narrate this live surveillance scene in 2-3 sentences. Be concise and professional.
+
+Source mode: {body.source_mode}
+People detected: {body.person_count}
+Objects detected: {body.object_count}
+Active anomalies: {', '.join(anomaly_summary) if anomaly_summary else 'none'}
+Tracked entities: {', '.join(track_summary) if track_summary else 'none'}
+
+Write a natural, professional security narration as if describing what you see on a CCTV feed."""
+
+    response = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=200,
+    )
+    narration = response.choices[0].message.content or "No scene data available."
+    return {"narration": narration}
+
+
 @app.post("/api/archive/clear")
 def clear_archive():
     removed = 0
