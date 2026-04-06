@@ -516,18 +516,28 @@ export default function AlertHistory() {
                               : (record.source ?? "LIVE").toUpperCase()}
                       </span>
                     </td>
-                    <td style={{ padding: "11px 16px" }}>
+                    <td style={{ padding: "8px 16px" }}>
                       {record.snapshot_url ? (
                         <a
                           href={record.snapshot_url}
                           target="_blank"
                           rel="noreferrer"
-                          style={{ color: "#60a5fa", fontSize: 11, fontWeight: 600, textDecoration: "none" }}
+                          title="Click to open full snapshot"
+                          style={{ display: "inline-block", lineHeight: 0, borderRadius: 6, overflow: "hidden", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 2px 8px rgba(0,0,0,0.4)" }}
                         >
-                          Open snapshot
+                          <img
+                            src={record.snapshot_url}
+                            alt="Incident snapshot"
+                            style={{ width: 96, height: 54, objectFit: "cover", display: "block" }}
+                            loading="lazy"
+                            onError={(e) => {
+                              (e.currentTarget.parentElement as HTMLElement).innerHTML =
+                                '<span style="color:#334155;font-size:11px;padding:4px 8px;display:inline-block">No image</span>';
+                            }}
+                          />
                         </a>
                       ) : (
-                        <span style={{ color: "#334155", fontSize: 11 }}>None</span>
+                        <span style={{ color: "#334155", fontSize: 11 }}>—</span>
                       )}
                     </td>
                   </tr>
