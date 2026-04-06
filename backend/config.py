@@ -4,7 +4,7 @@ FRAME_HEIGHT = 720
 # YOLO11n — Ultralytics' newest architecture. Better accuracy and speed than
 # YOLOv8n at the same model size. Auto-downloaded on first run.
 YOLO_MODEL = "yolo11n.pt"
-CONFIDENCE_THRESHOLD = 0.20
+CONFIDENCE_THRESHOLD = 0.25
 
 # Inference resolution for video / webcam modes.
 # YOLO was trained at 640px; running at native 640x360 avoids the internal
@@ -16,11 +16,11 @@ INFER_HEIGHT = 360
 STREAM_FRAME_WIDTH = 640
 STREAM_FRAME_HEIGHT = 360
 STREAM_TARGET_FPS = 12
-STREAM_DETECTION_CONFIDENCE = 0.15
+STREAM_DETECTION_CONFIDENCE = 0.25
 
 # Detection confidence overrides per mode.
-VIDEO_DETECTION_CONFIDENCE = 0.15
-WEBCAM_DETECTION_CONFIDENCE = 0.22
+VIDEO_DETECTION_CONFIDENCE = 0.28
+WEBCAM_DETECTION_CONFIDENCE = 0.28
 
 # Tracker confirmation policy.
 # 2 = require 2 consecutive hits before showing a track (reduces flicker while

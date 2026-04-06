@@ -186,10 +186,35 @@ function SimulationCanvas({
 
       // ── Detection tracks ────────────────────────────────────────────────────
 
-      for (const track of tracks) {
+      // Sort: anomalies/running first so their labels win collision checks
+      const sorted = [...tracks].sort((a, b) => {
+        const aScore = (anomalyIds.has(a.id) || a.running) ? 1 : 0;
+        const bScore = (anomalyIds.has(b.id) || b.running) ? 1 : 0;
+        return bScore - aScore;
+      });
+
+      // Track placed label regions to avoid overlapping text
+      const placedLabels: { lx: number; ly: number; lw: number; lh: number }[] = [];
+
+      const labelOverlaps = (lx: number, ly: number, lw: number, lh: number) => {
+        const pad = 2;
+        for (const p of placedLabels) {
+          if (
+            lx < p.lx + p.lw + pad &&
+            lx + lw + pad > p.lx &&
+            ly < p.ly + p.lh + pad &&
+            ly + lh + pad > p.ly
+          ) return true;
+        }
+        return false;
+      };
+
+      for (const track of sorted) {
         const { x1, y1, x2, y2, class_id, class_name, running, id, confidence } = track;
         const isAnomaly = anomalyIds.has(id);
         const isPerson = class_id === 0;
+        const boxW = x2 - x1;
+        const boxH = y2 - y1;
 
         let color: string;
         if (running) color = "#ef4444";
@@ -201,17 +226,27 @@ function SimulationCanvas({
         drawCornerMarker(ctx, x1, y1, x2, y2, color);
         ctx.shadowBlur = 0;
 
-        const confStr = confidence !== undefined ? ` ${(confidence * 100).toFixed(0)}%` : "";
-        const labelText = `#${id} ${class_name}${confStr}${running ? " ⚡" : ""}`;
-        ctx.font = "600 10px monospace";
-        const tw = ctx.measureText(labelText).width;
-        const lx = Math.min(x1, W - tw - 14);
-        const ly = y1 > 22 ? y1 - 20 : y2 + 4;
-        roundRect(ctx, lx - 4, ly - 1, tw + 10, 16, 4);
-        ctx.fillStyle = color + "cc";
-        ctx.fill();
-        ctx.fillStyle = "#fff";
-        ctx.fillText(labelText, lx, ly + 11);
+        // Skip label for very small detections (tiny/far objects)
+        const tooSmall = boxW < 38 && boxH < 38;
+        if (!tooSmall) {
+          const confStr = confidence !== undefined ? ` ${(confidence * 100).toFixed(0)}%` : "";
+          const labelText = `#${id} ${class_name}${confStr}${running ? " ⚡" : ""}`;
+          ctx.font = "600 10px monospace";
+          const tw = ctx.measureText(labelText).width;
+          const lh = 16;
+          const lw = tw + 10;
+          const lx = Math.min(x1, W - lw - 4);
+          const ly = y1 > 22 ? y1 - 20 : y2 + 4;
+
+          if (!labelOverlaps(lx - 4, ly - 1, lw, lh)) {
+            placedLabels.push({ lx: lx - 4, ly: ly - 1, lw, lh });
+            roundRect(ctx, lx - 4, ly - 1, lw, lh, 4);
+            ctx.fillStyle = color + "cc";
+            ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.fillText(labelText, lx, ly + 11);
+          }
+        }
 
         if (running) {
           const cx = (x1 + x2) / 2;
