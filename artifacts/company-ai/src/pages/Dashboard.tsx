@@ -2,6 +2,7 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import { useDetection } from "../context/DetectionContext";
 import { useAlertSound } from "../hooks/useAlertSound";
 import { useCamProcessor } from "../hooks/useCamProcessor";
+import { useIsMobile } from "../hooks/use-mobile";
 import SimulationCanvas from "../components/SimulationCanvas";
 import StatsCards from "../components/StatsCards";
 import AlertsFeed from "../components/AlertsFeed";
@@ -63,6 +64,7 @@ type SourceMode = "idle" | "webcam" | "video" | "stream";
 
 export default function Dashboard() {
   const { frame, connected } = useDetection();
+  const isMobile = useIsMobile();
 
   const [sourceMode, setSourceMode] = useState<SourceMode>("idle");
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -107,7 +109,12 @@ export default function Dashboard() {
       try {
         const res = await fetch("/api/video/status");
         const data = await res.json();
-        setVideoStatus(data);
+        setVideoStatus(prev => {
+          if (prev?.mode === "processing" && data.mode !== "processing") {
+            setSourceMode(s => s === "video" ? "idle" : s);
+          }
+          return data;
+        });
       } catch {}
     };
     poll();
@@ -352,20 +359,26 @@ export default function Dashboard() {
       />
 
       {/* ── Header ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22, flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f1f5f9", letterSpacing: -0.5, marginBottom: 4 }}>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ marginBottom: isMobile ? 12 : 14 }}>
+          <h1 style={{ fontSize: isMobile ? 18 : 22, fontWeight: 700, color: "#f1f5f9", letterSpacing: -0.5, marginBottom: 4 }}>
             Live Surveillance Dashboard
           </h1>
-          <p style={{ color: "#475569", fontSize: 13 }}>
+          <p style={{ color: "#475569", fontSize: isMobile ? 11 : 13 }}>
             {displayMode === "video"  && "YOLO11n + SORT — processing uploaded video"}
             {displayMode === "webcam" && "YOLO11n + SORT — real-time webcam detection"}
             {displayMode === "stream" && `YOLO11n + SORT — live stream: ${streamStatus?.url ?? ""}`}
-            {(displayMode === "idle" || !displayMode) && "Select a source below — webcam, video upload, or live stream"}
+            {(displayMode === "idle" || !displayMode) && "Select a source — webcam, video upload, or live stream"}
           </p>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          overflowX: isMobile ? "auto" : "visible",
+          flexWrap: isMobile ? "nowrap" : "wrap",
+          paddingBottom: isMobile ? 4 : 0,
+          scrollbarWidth: "none",
+        }}>
           {/* Sound toggle */}
           <button
             onClick={() => setSoundEnabled(v => !v)}
@@ -724,7 +737,12 @@ export default function Dashboard() {
       )}
 
       {/* ── Main grid ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 310px", gap: 20, alignItems: "start" }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isMobile ? "1fr" : "1fr 310px",
+        gap: isMobile ? 14 : 20,
+        alignItems: "start",
+      }}>
         <div>
           <div style={{
             borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)", overflow: "hidden",
@@ -761,9 +779,14 @@ export default function Dashboard() {
           </div>
 
           {/* Metric pills */}
-          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)",
+            gap: isMobile ? 8 : 10,
+            marginTop: 10,
+          }}>
             {metricPills.map(({ icon: Icon, label, value, color }) => (
-              <div key={label} style={PILL_STYLE}>
+              <div key={label} style={{ ...PILL_STYLE, flex: "unset" }}>
                 <Icon size={16} color={color} style={{ flexShrink: 0 }} />
                 <div>
                   <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1.2 }}>{value}</div>

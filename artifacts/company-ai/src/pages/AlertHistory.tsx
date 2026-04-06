@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, BarChart2, Camera, Download, Filter, RefreshCw, ShieldAlert, UserRoundX, Users, Zap } from "lucide-react";
+import { useIsMobile } from "../hooks/use-mobile";
 import {
   Bar,
   BarChart,
@@ -185,11 +186,12 @@ function renderDetails(record: AlertRecord): string {
 }
 
 export default function AlertHistory() {
+  const isMobile = useIsMobile();
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [showChart, setShowChart] = useState(true);
+  const [showChart, setShowChart] = useState(!isMobile);
 
   const fetchHistory = async (showRefreshing = false) => {
     if (showRefreshing) setRefreshing(true);
@@ -230,77 +232,72 @@ export default function AlertHistory() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+      <div style={{
+        display: "flex", alignItems: isMobile ? "flex-start" : "center",
+        flexDirection: isMobile ? "column" : "row",
+        justifyContent: "space-between", marginBottom: 20, gap: 12,
+      }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f1f5f9", letterSpacing: -0.5, marginBottom: 4 }}>
+          <h1 style={{ fontSize: isMobile ? 18 : 22, fontWeight: 700, color: "#f1f5f9", letterSpacing: -0.5, marginBottom: 4 }}>
             Alert History
           </h1>
-          <p style={{ color: "#475569", fontSize: 13 }}>
-            Full incident log - {alerts.length} total events recorded
+          <p style={{ color: "#475569", fontSize: isMobile ? 11 : 13 }}>
+            {alerts.length} total events recorded
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
           <button
             onClick={() => setShowChart((v) => !v)}
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 16px",
-              borderRadius: 8,
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "7px 12px", borderRadius: 8,
               border: "1px solid rgba(255,255,255,0.1)",
               background: showChart ? "rgba(59,130,246,0.1)" : "rgba(255,255,255,0.04)",
               color: showChart ? "#3b82f6" : "#64748b",
-              cursor: "pointer",
-              fontSize: 12,
+              cursor: "pointer", fontSize: 12,
             }}
           >
             <BarChart2 size={13} />
-            {showChart ? "Hide Chart" : "Show Chart"}
+            {!isMobile && (showChart ? "Hide Chart" : "Show Chart")}
           </button>
 
           <button
             onClick={() => exportCSV(filtered)}
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 16px",
-              borderRadius: 8,
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "7px 12px", borderRadius: 8,
               border: "1px solid rgba(255,255,255,0.1)",
               background: "rgba(255,255,255,0.04)",
-              color: "#64748b",
-              cursor: "pointer",
-              fontSize: 12,
+              color: "#64748b", cursor: "pointer", fontSize: 12,
             }}
           >
             <Download size={13} />
-            Export CSV
+            {!isMobile && "Export CSV"}
           </button>
 
           <button
             onClick={() => fetchHistory(true)}
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 16px",
-              borderRadius: 8,
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "7px 12px", borderRadius: 8,
               border: "1px solid rgba(255,255,255,0.1)",
               background: "rgba(255,255,255,0.04)",
-              color: "#64748b",
-              cursor: "pointer",
-              fontSize: 12,
+              color: "#64748b", cursor: "pointer", fontSize: 12,
             }}
           >
             <RefreshCw size={13} style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }} />
-            Refresh
+            {!isMobile && "Refresh"}
           </button>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5,minmax(0,1fr))", gap: 14, marginBottom: 24 }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, minmax(0,1fr))",
+        gap: isMobile ? 10 : 14,
+        marginBottom: 20,
+      }}>
         {summaryCards.map(({ type, color, Icon, label, count, severity }) => (
           <div
             key={type}
@@ -386,8 +383,14 @@ export default function AlertHistory() {
         </div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-        <Filter size={13} color="#475569" />
+      <div style={{
+        display: "flex", alignItems: "center", gap: 8, marginBottom: 16,
+        overflowX: isMobile ? "auto" : "visible",
+        flexWrap: isMobile ? "nowrap" : "wrap",
+        paddingBottom: isMobile ? 4 : 0,
+        scrollbarWidth: "none",
+      }}>
+        <Filter size={13} color="#475569" style={{ flexShrink: 0 }} />
         {FILTER_OPTIONS.map((option) => {
           const meta = TYPE_META[option as keyof typeof TYPE_META];
           const active = filter === option;

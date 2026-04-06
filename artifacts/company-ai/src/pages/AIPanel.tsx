@@ -5,6 +5,7 @@ import {
   ShieldAlert, Users, UserRoundX, Package, Camera,
 } from "lucide-react";
 import { useDetection } from "../context/DetectionContext";
+import { useIsMobile } from "../hooks/use-mobile";
 
 // ── types ───────────────────────────────────────────────────────────────────
 
@@ -581,11 +582,16 @@ type Tab = "reports" | "chat" | "narrator";
 
 export default function AIPanel() {
   const [tab, setTab] = useState<Tab>("narrator");
+  const isMobile = useIsMobile();
 
   return (
     <div>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
+      <div style={{
+        display: "flex", alignItems: isMobile ? "flex-start" : "center",
+        justifyContent: "space-between", flexDirection: isMobile ? "column" : "row",
+        gap: 12, marginBottom: isMobile ? 18 : 28,
+      }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
             <div style={{
@@ -593,20 +599,22 @@ export default function AIPanel() {
               background: "linear-gradient(135deg, #4f46e5, #6366f1)",
               display: "flex", alignItems: "center", justifyContent: "center",
               boxShadow: "0 4px 20px rgba(99,102,241,0.4)",
+              flexShrink: 0,
             }}>
               <Bot size={18} color="#fff" />
             </div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, color: "#f1f5f9", letterSpacing: -0.5, margin: 0 }}>
+            <h1 style={{ fontSize: isMobile ? 18 : 22, fontWeight: 800, color: "#f1f5f9", letterSpacing: -0.5, margin: 0 }}>
               AI Assistant
             </h1>
           </div>
-          <p style={{ color: "#475569", fontSize: 13, margin: 0 }}>
+          <p style={{ color: "#475569", fontSize: isMobile ? 11 : 13, margin: 0 }}>
             Powered by GPT · Incident reports, alert chat, and live scene narration
           </p>
         </div>
         <div style={{
           background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)",
           borderRadius: 20, padding: "4px 14px", display: "flex", alignItems: "center", gap: 6,
+          alignSelf: isMobile ? "flex-start" : "center",
         }}>
           <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#6366f1", boxShadow: "0 0 8px #6366f1" }} />
           <span style={{ fontSize: 11, color: "#818cf8", fontWeight: 700, letterSpacing: 1 }}>AI ONLINE</span>
@@ -614,9 +622,14 @@ export default function AIPanel() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 24, borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 2 }}>
-        <TabButton active={tab === "narrator"} onClick={() => setTab("narrator")} icon={Mic2}        label="Live Narrator" />
-        <TabButton active={tab === "reports"}  onClick={() => setTab("reports")}  icon={FileText}    label="Incident Reports" />
+      <div style={{
+        display: "flex", gap: 4, marginBottom: 20,
+        borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 2,
+        overflowX: isMobile ? "auto" : "visible",
+        scrollbarWidth: "none",
+      }}>
+        <TabButton active={tab === "narrator"} onClick={() => setTab("narrator")} icon={Mic2}          label="Live Narrator" />
+        <TabButton active={tab === "reports"}  onClick={() => setTab("reports")}  icon={FileText}      label="Incident Reports" />
         <TabButton active={tab === "chat"}     onClick={() => setTab("chat")}     icon={MessageSquare} label="Alert Chat" />
       </div>
 
