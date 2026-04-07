@@ -14,7 +14,14 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
+from fastapi import (
+    FastAPI,
+    WebSocket,
+    WebSocketDisconnect,
+    UploadFile,
+    File,
+    HTTPException,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
@@ -22,19 +29,36 @@ from pydantic import BaseModel
 from backend.anomaly import AnomalyDetector
 import backend.database as _db
 from backend.config import (
-    OVERCROWDING_THRESHOLD, RUNNING_SPEED_THRESHOLD,
-    UNATTENDED_OBJECT_TIME, STATIONARY_THRESHOLD, COCO_CLASSES,
-    UNATTENDED_OWNER_PROXIMITY_PX, UNATTENDED_OWNER_GRACE_TIME,
-    FALL_ASPECT_RATIO_THRESHOLD, FALL_PERSISTENCE_TIME,
-    RESTRICTED_ZONE_ENABLED, RESTRICTED_ZONE_MIN_DWELL,
-    FIGHT_DETECTION_ENABLED, FIGHT_PROXIMITY_PX, FIGHT_MIN_PAIR_SPEED,
-    FIGHT_PERSISTENCE_TIME, FIGHT_MIN_HIT_STREAK,
-    RESTRICTED_ZONES, FRAME_WIDTH, FRAME_HEIGHT,
-    STREAM_FRAME_WIDTH, STREAM_FRAME_HEIGHT,
-    STREAM_TARGET_FPS, STREAM_DETECTION_CONFIDENCE,
-    VIDEO_DETECTION_CONFIDENCE, WEBCAM_DETECTION_CONFIDENCE,
-    TRACKER_MIN_HITS, INFER_WIDTH, INFER_HEIGHT,
-    MAX_AGE, IOU_THRESHOLD,
+    OVERCROWDING_THRESHOLD,
+    RUNNING_SPEED_THRESHOLD,
+    UNATTENDED_OBJECT_TIME,
+    STATIONARY_THRESHOLD,
+    COCO_CLASSES,
+    UNATTENDED_OWNER_PROXIMITY_PX,
+    UNATTENDED_OWNER_GRACE_TIME,
+    FALL_ASPECT_RATIO_THRESHOLD,
+    FALL_PERSISTENCE_TIME,
+    RESTRICTED_ZONE_ENABLED,
+    RESTRICTED_ZONE_MIN_DWELL,
+    FIGHT_DETECTION_ENABLED,
+    FIGHT_PROXIMITY_PX,
+    FIGHT_MIN_PAIR_SPEED,
+    FIGHT_PERSISTENCE_TIME,
+    FIGHT_MIN_HIT_STREAK,
+    RESTRICTED_ZONES,
+    FRAME_WIDTH,
+    FRAME_HEIGHT,
+    STREAM_FRAME_WIDTH,
+    STREAM_FRAME_HEIGHT,
+    STREAM_TARGET_FPS,
+    STREAM_DETECTION_CONFIDENCE,
+    VIDEO_DETECTION_CONFIDENCE,
+    WEBCAM_DETECTION_CONFIDENCE,
+    TRACKER_MIN_HITS,
+    INFER_WIDTH,
+    INFER_HEIGHT,
+    MAX_AGE,
+    IOU_THRESHOLD,
 )
 from backend.detector import _download_model, is_model_ready, get_model_error
 
@@ -121,6 +145,7 @@ _cam_frame_queue: asyncio.Queue = asyncio.Queue(maxsize=4)
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def _get_zone(cx: float, frame_width: int) -> str:
     if cx < frame_width / 3:
         return "A"
@@ -150,13 +175,15 @@ def _should_record_alert(anomaly: dict, now: float) -> bool:
 def _reset_fps_window():
     """Reset rolling FPS window and live counters when switching source modes."""
     _frame_times.clear()
-    stats_snapshot.update({
-        "person_count": 0,
-        "object_count": 0,
-        "anomaly_count": 0,
-        "fps": 0,
-        "uptime_seconds": round(time.time() - _start_time),
-    })
+    stats_snapshot.update(
+        {
+            "person_count": 0,
+            "object_count": 0,
+            "anomaly_count": 0,
+            "fps": 0,
+            "uptime_seconds": round(time.time() - _start_time),
+        }
+    )
 
 
 def _cleanup_archive(now: float):
@@ -170,7 +197,10 @@ def _cleanup_archive(now: float):
         for fn in os.listdir(_archive_dir):
             p = os.path.join(_archive_dir, fn)
             try:
-                if os.path.isfile(p) and now - os.path.getmtime(p) > _archive_retention_seconds:
+                if (
+                    os.path.isfile(p)
+                    and now - os.path.getmtime(p) > _archive_retention_seconds
+                ):
                     os.unlink(p)
             except Exception:
                 continue
@@ -182,6 +212,7 @@ def _save_archive_snapshot(frame, now: float) -> str | None:
     """Persist a JPEG snapshot for incident evidence and return a fetchable URL."""
     try:
         import cv2
+
         _cleanup_archive(now)
         ts = time.strftime("%Y%m%d_%H%M%S", time.localtime(now))
         ms = int((now - int(now)) * 1000)
@@ -218,13 +249,15 @@ def build_frame_payload(
         elapsed = _frame_times[-1] - _frame_times[0]
         fps = round((len(_frame_times) - 1) / elapsed) if elapsed > 0 else 0
 
-    stats_snapshot.update({
-        "person_count": person_count,
-        "object_count": object_count,
-        "anomaly_count": len(anomalies),
-        "fps": fps,
-        "uptime_seconds": round(now - _start_time),
-    })
+    stats_snapshot.update(
+        {
+            "person_count": person_count,
+            "object_count": object_count,
+            "anomaly_count": len(anomalies),
+            "fps": fps,
+            "uptime_seconds": round(now - _start_time),
+        }
+    )
 
     serializable_anomalies = []
     for a in anomalies:
@@ -236,7 +269,9 @@ def build_frame_payload(
 
     global _alert_id_counter
     effective_mode = mode or _processing_mode
-    recordable_anomalies = [a for a in serializable_anomalies if _should_record_alert(a, now)]
+    recordable_anomalies = [
+        a for a in serializable_anomalies if _should_record_alert(a, now)
+    ]
     if frame_for_archive is not None:
         _latest_frame_for_snapshot = frame_for_archive.copy()
     snapshot_url = None
@@ -244,17 +279,17 @@ def build_frame_payload(
         snapshot_url = _save_archive_snapshot(frame_for_archive, now)
 
     for a in recordable_anomalies:
-            _alert_id_counter += 1
-            entry = {
-                "id": _alert_id_counter,
-                "anomaly": a,
-                "timestamp": now,
-                "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
-                "source": effective_mode,
-                "snapshot_url": snapshot_url,
-            }
-            alert_history.append(entry)
-            _db_executor.submit(_db._insert_alert_sync, entry)
+        _alert_id_counter += 1
+        entry = {
+            "id": _alert_id_counter,
+            "anomaly": a,
+            "timestamp": now,
+            "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+            "source": effective_mode,
+            "snapshot_url": snapshot_url,
+        }
+        alert_history.append(entry)
+        _db_executor.submit(_db._insert_alert_sync, entry)
 
     return {
         "tracks": tracks,
@@ -268,6 +303,7 @@ def build_frame_payload(
 def _apply_config():
     import backend.config as cfg
     import backend.anomaly as am
+
     for k, v in current_config.items():
         setattr(cfg, k.upper(), v)
         setattr(am, k.upper(), v)
@@ -299,7 +335,9 @@ async def _cancel_active():
             pass
 
 
-def _build_tracks_from_yolo(raw_tracks: list, frame_width: int, frame_height: int) -> list:
+def _build_tracks_from_yolo(
+    raw_tracks: list, frame_width: int, frame_height: int
+) -> list:
     # Scale bbox coordinates from inference resolution to the fixed 1280×720 canvas
     # space so the frontend always receives consistent coordinates regardless of
     # what resolution YOLO inference was run at.
@@ -310,21 +348,26 @@ def _build_tracks_from_yolo(raw_tracks: list, frame_width: int, frame_height: in
         rx1, ry1, rx2, ry2 = t["bbox"]
         x1 = max(0, int(rx1 * scale_x))
         y1 = max(0, int(ry1 * scale_y))
-        x2 = min(FRAME_WIDTH,  int(rx2 * scale_x))
+        x2 = min(FRAME_WIDTH, int(rx2 * scale_x))
         y2 = min(FRAME_HEIGHT, int(ry2 * scale_y))
         cx = (x1 + x2) / 2
-        tracks.append({
-            "id": t["id"],
-            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-            "class_id": t["class_id"],
-            "class_name": COCO_CLASSES.get(t["class_id"], "object"),
-            "running": False,
-            "confidence": round(t.get("confidence", 0), 2),
-            "zone": _get_zone(cx, FRAME_WIDTH),
-            "hit_streak": int(t.get("hit_streak", 0)),
-            "frame_width": FRAME_WIDTH,
-            "frame_height": FRAME_HEIGHT,
-        })
+        tracks.append(
+            {
+                "id": t["id"],
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2,
+                "class_id": t["class_id"],
+                "class_name": COCO_CLASSES.get(t["class_id"], "object"),
+                "running": False,
+                "confidence": round(t.get("confidence", 0), 2),
+                "zone": _get_zone(cx, FRAME_WIDTH),
+                "hit_streak": int(t.get("hit_streak", 0)),
+                "frame_width": FRAME_WIDTH,
+                "frame_height": FRAME_HEIGHT,
+            }
+        )
     return tracks
 
 
@@ -338,13 +381,15 @@ def _finalize_tracks(tracks: list, anomalies: list) -> list:
 def _encode_preview(frame) -> str:
     """Encode a cv2 frame as a compact base64 JPEG for WebSocket transmission."""
     import cv2
-    # Resize down for efficient WebSocket transmission but maintain 16:9 
+
+    # Resize down for efficient WebSocket transmission but maintain 16:9
     frame = cv2.resize(frame, (640, 360))
     _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
     return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
 # ─── Video processing loop ────────────────────────────────────────────────────
+
 
 async def video_processing_loop():
     global _video_anomaly_detector
@@ -361,7 +406,9 @@ async def video_processing_loop():
 
     try:
         detector = YOLOv8Detector()
-        tracker = Sort(max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD)
+        tracker = Sort(
+            max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD
+        )
         _video_anomaly_detector = AnomalyDetector()
     except Exception as e:
         video_status["error"] = f"Detector init failed: {e}"
@@ -401,7 +448,9 @@ async def video_processing_loop():
 
             frame_num += 1
             video_status["current_frame"] = frame_num
-            video_status["progress"] = round((frame_num / total * 100), 1) if total > 0 else 0
+            video_status["progress"] = (
+                round((frame_num / total * 100), 1) if total > 0 else 0
+            )
 
             # Target wall-clock time for this frame based on native video FPS
             target_time = playback_start + frame_num * frame_interval
@@ -417,7 +466,9 @@ async def video_processing_loop():
                         break
                     frame_num += 1
                 video_status["current_frame"] = frame_num
-                video_status["progress"] = round((frame_num / total * 100), 1) if total > 0 else 0
+                video_status["progress"] = (
+                    round((frame_num / total * 100), 1) if total > 0 else 0
+                )
                 await asyncio.sleep(0)
                 continue
 
@@ -455,6 +506,7 @@ async def video_processing_loop():
 
 # ─── Stream processing loop (RTSP / HTTP / IP camera) ─────────────────────────
 
+
 async def stream_processing_loop(url: str):
     """Use an FFmpeg subprocess to pipe raw BGR frames.
 
@@ -485,7 +537,9 @@ async def stream_processing_loop(url: str):
 
     try:
         detector = YOLOv8Detector()
-        tracker = Sort(max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD)
+        tracker = Sort(
+            max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD
+        )
         _video_anomaly_detector = AnomalyDetector()
     except Exception as e:
         stream_status["error"] = f"Detector init failed: {e}"
@@ -504,7 +558,7 @@ async def stream_processing_loop(url: str):
     # Target output rate from ffmpeg. Keep this conservative on CPU.
     STREAM_FPS = STREAM_TARGET_FPS
     STREAM_CONFIDENCE = max(0.01, min(0.99, STREAM_DETECTION_CONFIDENCE))
-    FIRST_FRAME_TIMEOUT_SECS = 15
+    FIRST_FRAME_TIMEOUT_SECS = 30
     REMOTE_FILE_MAX_BYTES = 750 * 1024 * 1024
     REMOTE_FILE_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 
@@ -513,6 +567,9 @@ async def stream_processing_loop(url: str):
         if parsed.scheme.lower() not in {"http", "https"}:
             return False
         p = parsed.path.lower()
+        # DroidCam uses /video path which is a live stream, not a file
+        if "/video" in p or "/mjpeg" in p or "/stream" in p:
+            return False
         return any(p.endswith(ext) for ext in REMOTE_FILE_EXTENSIONS)
 
     def _download_http_file(u: str) -> str:
@@ -550,30 +607,53 @@ async def stream_processing_loop(url: str):
         if source_input.lower().startswith("rtsp://"):
             # RTSP sources can hang and buffer deeply; use low-latency settings.
             cmd += [
-                "-fflags", "nobuffer",
-                "-flags", "low_delay",
-                "-analyzeduration", "0",
-                "-probesize", "32",
-                "-rtsp_transport", "tcp",
-                "-timeout", "10000000",
-                "-rw_timeout", "10000000",
+                "-fflags",
+                "nobuffer",
+                "-flags",
+                "low_delay",
+                "-analyzeduration",
+                "0",
+                "-probesize",
+                "32",
+                "-rtsp_transport",
+                "tcp",
+                "-timeout",
+                "10000000",
+                "-rw_timeout",
+                "10000000",
             ]
         elif source_input.lower().startswith(("http://", "https://")):
             cmd += [
-                "-user_agent", "CrowdLens/1.0 ffmpeg",
-                "-reconnect", "1",
-                "-reconnect_streamed", "1",
-                "-reconnect_on_network_error", "1",
-                "-reconnect_at_eof", "1",
-                "-reconnect_delay_max", "2",
-                "-fflags", "nobuffer",
+                "-user_agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "-reconnect",
+                "1",
+                "-reconnect_streamed",
+                "1",
+                "-reconnect_on_network_error",
+                "1",
+                "-reconnect_at_eof",
+                "1",
+                "-reconnect_delay_max",
+                "5",
+                "-rw_timeout",
+                "30000000",
+                "-analyzeduration",
+                "10000000",
+                "-probesize",
+                "10000000",
             ]
         cmd += [
-            "-i", source_input,
-            "-f", "rawvideo",
-            "-pix_fmt", "bgr24",
-            "-vsync", "drop",
-            "-vf", f"scale={W}:{H},fps={STREAM_FPS}",
+            "-i",
+            source_input,
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "bgr24",
+            "-vsync",
+            "drop",
+            "-vf",
+            f"scale={W}:{H},fps={STREAM_FPS}",
             "-",
         ]
         return cmd
@@ -664,7 +744,9 @@ async def stream_processing_loop(url: str):
                 stderr_str = _read_stderr()
                 low = stderr_str.lower()
 
-                stream_ended = reader_state.get("eof") or (proc is not None and proc.poll() is not None)
+                stream_ended = reader_state.get("eof") or (
+                    proc is not None and proc.poll() is not None
+                )
 
                 if proc is not None and proc.poll() is None:
                     proc.kill()
@@ -680,18 +762,30 @@ async def stream_processing_loop(url: str):
                 ):
                     tried_http_file_fallback = True
                     try:
-                        downloaded_file_path = await loop.run_in_executor(None, _download_http_file, url)
+                        downloaded_file_path = await loop.run_in_executor(
+                            None, _download_http_file, url
+                        )
                         source_input = downloaded_file_path
-                        print(f"[stream] Download fallback ready: {downloaded_file_path}")
-                        tracker = Sort(max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD)
+                        print(
+                            f"[stream] Download fallback ready: {downloaded_file_path}"
+                        )
+                        tracker = Sort(
+                            max_age=MAX_AGE,
+                            min_hits=TRACKER_MIN_HITS,
+                            iou_threshold=IOU_THRESHOLD,
+                        )
                         _video_anomaly_detector = AnomalyDetector()
                         frames_processed = 0
                         proc = await loop.run_in_executor(None, _start_proc)
-                        frame_q, reader_stop, reader_thread, reader_state = _start_reader(proc)
+                        frame_q, reader_stop, reader_thread, reader_state = (
+                            _start_reader(proc)
+                        )
                         print(f"[stream] FFmpeg opened: {source_input}")
                         continue
                     except Exception as dl_err:
-                        stream_status["error"] = f"Failed to download URL file: {dl_err}"
+                        stream_status["error"] = (
+                            f"Failed to download URL file: {dl_err}"
+                        )
                         break
 
                 if frames_processed == 0:
@@ -705,7 +799,11 @@ async def stream_processing_loop(url: str):
                             "Network cannot reach this stream host/port from this machine. "
                             "Try another source or verify firewall/ISP/network access."
                         )
-                    elif "403" in stderr_str or "forbidden" in low or "connection refused" in low:
+                    elif (
+                        "403" in stderr_str
+                        or "forbidden" in low
+                        or "connection refused" in low
+                    ):
                         stream_status["error"] = (
                             "Connection refused. For RTSP, verify camera reachability and port access; "
                             "otherwise try an HTTP/MJPEG/HLS URL."
@@ -715,13 +813,20 @@ async def stream_processing_loop(url: str):
                             "Connection timed out before receiving frames. "
                             "Verify stream URL, credentials, and network access."
                         )
-                    elif "nothing was written into output file" in low or "received no packets" in low:
+                    elif (
+                        "nothing was written into output file" in low
+                        or "received no packets" in low
+                    ):
                         stream_status["error"] = (
                             "No video packets received from this URL. "
                             "Use a direct MJPEG/HLS/RTSP stream, or upload/download the file first."
                         )
                     elif stream_ended:
-                        last_line = stderr_str.strip().split("\n")[-1] if stderr_str.strip() else ""
+                        last_line = (
+                            stderr_str.strip().split("\n")[-1]
+                            if stderr_str.strip()
+                            else ""
+                        )
                         stream_status["error"] = (
                             last_line[:250]
                             or "Could not open stream source. Verify URL format, credentials, and camera/network reachability."
@@ -739,7 +844,11 @@ async def stream_processing_loop(url: str):
 
                 # Had frames and source ended (e.g. finite HTTP MP4) -> loop automatically.
                 print(f"[stream] Video ended after {frames_processed} frames; looping")
-                tracker = Sort(max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD)
+                tracker = Sort(
+                    max_age=MAX_AGE,
+                    min_hits=TRACKER_MIN_HITS,
+                    iou_threshold=IOU_THRESHOLD,
+                )
                 _video_anomaly_detector = AnomalyDetector()
                 frames_processed = 0
                 proc = await loop.run_in_executor(None, _start_proc)
@@ -749,7 +858,9 @@ async def stream_processing_loop(url: str):
 
             frames_processed += 1
             frame = np.frombuffer(raw, dtype=np.uint8).reshape((H, W, 3)).copy()
-            detections = await loop.run_in_executor(None, detector.detect, frame, STREAM_CONFIDENCE)
+            detections = await loop.run_in_executor(
+                None, detector.detect, frame, STREAM_CONFIDENCE
+            )
             raw_tracks = tracker.update(detections)
 
             now = time.time()
@@ -807,7 +918,9 @@ async def webcam_processing_loop():
 
     try:
         detector = YOLOv8Detector()
-        tracker = Sort(max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD)
+        tracker = Sort(
+            max_age=MAX_AGE, min_hits=TRACKER_MIN_HITS, iou_threshold=IOU_THRESHOLD
+        )
         anomaly_detector = AnomalyDetector()
     except Exception as e:
         webcam_status["error"] = f"Detector init failed: {e}"
@@ -836,7 +949,9 @@ async def webcam_processing_loop():
                 continue
 
             frame = cv2.resize(frame, (INFER_WIDTH, INFER_HEIGHT))
-            detections = detector.detect(frame, conf_override=WEBCAM_DETECTION_CONFIDENCE)
+            detections = detector.detect(
+                frame, conf_override=WEBCAM_DETECTION_CONFIDENCE
+            )
             raw_tracks = tracker.update(detections)
 
             now = time.time()
@@ -860,6 +975,7 @@ async def webcam_processing_loop():
 
 # ─── Lifespan ─────────────────────────────────────────────────────────────────
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _apply_config()
@@ -869,6 +985,8 @@ async def lifespan(app: FastAPI):
     thread.start()
     yield
     await _cancel_active()
+
+
 # ─── App ──────────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="CrowdLens API", lifespan=lifespan)
@@ -883,6 +1001,32 @@ app.add_middleware(
 
 
 # ─── REST Endpoints ───────────────────────────────────────────────────────────
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    connected_clients.append(websocket)
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            if _processing_mode == "webcam" and data:
+                # Received webcam frame from frontend
+                try:
+                    _cam_frame_queue.put_nowait(data)
+                except asyncio.QueueFull:
+                    # Drop old frame if queue is full
+                    try:
+                        _cam_frame_queue.get_nowait()
+                        _cam_frame_queue.put_nowait(data)
+                    except:
+                        pass
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if websocket in connected_clients:
+            connected_clients.remove(websocket)
+
 
 @app.get("/api/health")
 def health():
@@ -931,19 +1075,21 @@ def capture_archive_snapshot():
         raise HTTPException(500, "Failed to save snapshot")
 
     _alert_id_counter += 1
-    alert_history.append({
-        "id": _alert_id_counter,
-        "anomaly": {
-            "type": "manual_snapshot",
-            "track_id": None,
-            "position": None,
-            "note": "Manual evidence capture",
-        },
-        "timestamp": now,
-        "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
-        "source": _processing_mode,
-        "snapshot_url": snapshot_url,
-    })
+    alert_history.append(
+        {
+            "id": _alert_id_counter,
+            "anomaly": {
+                "type": "manual_snapshot",
+                "track_id": None,
+                "position": None,
+                "note": "Manual evidence capture",
+            },
+            "timestamp": now,
+            "iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+            "source": _processing_mode,
+            "snapshot_url": snapshot_url,
+        }
+    )
     return {"success": True, "snapshot_url": snapshot_url}
 
 
@@ -1012,7 +1158,9 @@ def update_config(body: ConfigUpdate):
     if body.stationary_threshold is not None:
         current_config["stationary_threshold"] = body.stationary_threshold
     if body.unattended_owner_proximity_px is not None:
-        current_config["unattended_owner_proximity_px"] = body.unattended_owner_proximity_px
+        current_config["unattended_owner_proximity_px"] = (
+            body.unattended_owner_proximity_px
+        )
     if body.unattended_owner_grace_time is not None:
         current_config["unattended_owner_grace_time"] = body.unattended_owner_grace_time
     if body.fall_aspect_ratio_threshold is not None:
@@ -1038,6 +1186,7 @@ def update_config(body: ConfigUpdate):
 
 
 # ─── Video endpoints ──────────────────────────────────────────────────────────
+
 
 @app.post("/api/video/upload")
 async def upload_video(file: UploadFile = File(...)):
@@ -1075,7 +1224,11 @@ async def upload_video(file: UploadFile = File(...)):
     video_status["filename"] = file.filename
     video_status["mode"] = "ready"
     video_status["progress"] = 0
-    return {"success": True, "filename": file.filename, "size_mb": round(total_size / 1e6, 1)}
+    return {
+        "success": True,
+        "filename": file.filename,
+        "size_mb": round(total_size / 1e6, 1),
+    }
 
 
 @app.post("/api/video/start")
@@ -1116,6 +1269,7 @@ def get_video_status():
 
 # ─── Stream endpoints ─────────────────────────────────────────────────────────
 
+
 class StreamRequest(BaseModel):
     url: str
 
@@ -1126,7 +1280,11 @@ _PRIVATE_HOSTNAMES = {"localhost", "localho.st"}
 # Set ALLOW_LOCAL_STREAMS=true when running locally to connect campus/home
 # IP cameras (192.168.x.x, 10.x.x.x, rtsp://local-ip, etc.).
 # Never set this in cloud/production — it disables the SSRF guard.
-_ALLOW_LOCAL_STREAMS = os.environ.get("ALLOW_LOCAL_STREAMS", "").lower() in {"1", "true", "yes"}
+_ALLOW_LOCAL_STREAMS = os.environ.get("ALLOW_LOCAL_STREAMS", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 
 def _validate_stream_url(url: str) -> str | None:
@@ -1154,7 +1312,12 @@ def _validate_stream_url(url: str) -> str | None:
         return "Stream URL targets a local address"
     try:
         addr = ipaddress.ip_address(host)
-        if addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_multicast:
+        if (
+            addr.is_loopback
+            or addr.is_private
+            or addr.is_link_local
+            or addr.is_multicast
+        ):
             return "Stream URL targets a private or internal network address"
     except ValueError:
         pass  # Not a raw IP — hostname is fine
@@ -1204,6 +1367,7 @@ def get_stream_status():
 
 # ─── Webcam mode endpoints ────────────────────────────────────────────────────
 
+
 @app.get("/api/webcam/status")
 def get_webcam_status():
     return {
@@ -1246,11 +1410,13 @@ async def stop_webcam():
 
 # ─── Built-in test MJPEG stream ───────────────────────────────────────────────
 
+
 async def _test_frame_generator():
     """Generates synthetic MJPEG frames that cv2.VideoCapture can read.
     Renders a dark scene with moving coloured rectangles at ~12 fps
     so the stream pipeline can be tested without an external camera."""
     import cv2
+
     W, H = 1280, 720
     fps_interval = 1 / 12
 
@@ -1265,29 +1431,40 @@ async def _test_frame_generator():
             cv2.line(frame, (0, y), (W, y), (20, 30, 50), 1)
 
         # Three animated "people" (tall rectangles)
-        for i, (base_x, spd, col) in enumerate([
-            (200, 1.2, (80, 180, 80)),
-            (600, 0.9, (180, 80, 80)),
-            (1000, 1.5, (80, 80, 180)),
-        ]):
+        for i, (base_x, spd, col) in enumerate(
+            [
+                (200, 1.2, (80, 180, 80)),
+                (600, 0.9, (180, 80, 80)),
+                (1000, 1.5, (80, 80, 180)),
+            ]
+        ):
             cx = int(base_x + 180 * math.sin(t * spd + i * 2))
             cy = int(H // 2 + 60 * math.cos(t * 0.7 + i))
             cv2.rectangle(frame, (cx - 30, cy - 70), (cx + 30, cy + 70), col, -1)
-            cv2.putText(frame, f"test-{i+1}", (cx - 28, cy - 78),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1)
+            cv2.putText(
+                frame,
+                f"test-{i + 1}",
+                (cx - 28, cy - 78),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                col,
+                1,
+            )
 
         # Timestamp overlay
         ts = time.strftime("%H:%M:%S", time.localtime(t))
-        cv2.putText(frame, f"CrowdLens TEST STREAM  {ts}", (20, 36),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 180, 255), 2)
+        cv2.putText(
+            frame,
+            f"CrowdLens TEST STREAM  {ts}",
+            (20, 36),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (100, 180, 255),
+            2,
+        )
 
         _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-        yield (
-            b"--frame\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n"
-            + buf.tobytes()
-            + b"\r\n"
-        )
+        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n")
         await asyncio.sleep(fps_interval)
 
 
@@ -1303,10 +1480,12 @@ async def test_feed():
 
 # ─── AI Assistant routes ───────────────────────────────────────────────────────
 
+
 def _make_openai_client():
     import openai as _openai
+
     base_url = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
-    api_key  = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY", "dummy")
+    api_key = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY", "dummy")
     if base_url:
         return _openai.OpenAI(base_url=base_url, api_key=api_key)
     return _openai.OpenAI(api_key=api_key)
@@ -1331,20 +1510,35 @@ class AINarrateRequest(BaseModel):
 
 def _format_alert_for_ai(alert: dict) -> str:
     from datetime import datetime
+
     a = alert.get("anomaly", {})
     ts = alert.get("timestamp", 0)
-    t  = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S") if ts else "unknown"
-    parts = [f"Time: {t}", f"Type: {a.get('type', 'unknown')}", f"Source: {alert.get('source','live')}"]
-    if a.get("track_id") is not None:    parts.append(f"Track ID: #{a['track_id']}")
-    if a.get("track_ids"):               parts.append(f"Track Pair: #{a['track_ids'][0]} & #{a['track_ids'][1]}")
-    if a.get("count") is not None:       parts.append(f"People count: {a['count']}")
-    if a.get("avg_speed") is not None:   parts.append(f"Speed: {a['avg_speed']} px/frame")
-    if a.get("avg_pair_speed"):          parts.append(f"Pair speed: {a['avg_pair_speed']} px/frame")
-    if a.get("distance"):                parts.append(f"Distance between pair: {a['distance']} px")
-    if a.get("duration"):                parts.append(f"Duration: {a['duration']}s")
-    if a.get("zone_name"):               parts.append(f"Zone: {a['zone_name']}")
-    if a.get("position"):                parts.append(f"Position: {tuple(round(v) for v in a['position'])}")
-    if a.get("note"):                    parts.append(f"Note: {a['note']}")
+    t = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S") if ts else "unknown"
+    parts = [
+        f"Time: {t}",
+        f"Type: {a.get('type', 'unknown')}",
+        f"Source: {alert.get('source', 'live')}",
+    ]
+    if a.get("track_id") is not None:
+        parts.append(f"Track ID: #{a['track_id']}")
+    if a.get("track_ids"):
+        parts.append(f"Track Pair: #{a['track_ids'][0]} & #{a['track_ids'][1]}")
+    if a.get("count") is not None:
+        parts.append(f"People count: {a['count']}")
+    if a.get("avg_speed") is not None:
+        parts.append(f"Speed: {a['avg_speed']} px/frame")
+    if a.get("avg_pair_speed"):
+        parts.append(f"Pair speed: {a['avg_pair_speed']} px/frame")
+    if a.get("distance"):
+        parts.append(f"Distance between pair: {a['distance']} px")
+    if a.get("duration"):
+        parts.append(f"Duration: {a['duration']}s")
+    if a.get("zone_name"):
+        parts.append(f"Zone: {a['zone_name']}")
+    if a.get("position"):
+        parts.append(f"Position: {tuple(round(v) for v in a['position'])}")
+    if a.get("note"):
+        parts.append(f"Note: {a['note']}")
     return "\n".join(parts)
 
 
@@ -1379,12 +1573,16 @@ async def generate_ai_report(req: AIReportRequest):
         report = response.choices[0].message.content or ""
         return {"report": report}
     except Exception:
-        raise HTTPException(status_code=500, detail="Failed to generate report. The AI service may be unavailable.")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate report. The AI service may be unavailable.",
+        )
 
 
 @app.post("/api/ai/chat")
 async def ai_chat(req: AIChatRequest):
     """Streaming SSE chat with the AI about alert history."""
+
     async def stream():
         try:
             client = _make_openai_client()
@@ -1420,8 +1618,11 @@ async def ai_chat(req: AIChatRequest):
         except Exception:
             yield f"data: {json.dumps({'error': 'AI service error. Please try again.'})}\n\n"
 
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/ai/narrate")
@@ -1433,21 +1634,26 @@ async def ai_narrate(req: AINarrateRequest):
         track_lines = []
         for t in req.tracks[:20]:
             name = t.get("class_name", "person")
-            tid  = t.get("id", "?")
+            tid = t.get("id", "?")
             conf = t.get("confidence", 0)
-            run  = " (running)" if t.get("running") else ""
-            track_lines.append(f"  - Track #{tid}: {name}, conf={int(conf*100)}%{run}")
+            run = " (running)" if t.get("running") else ""
+            track_lines.append(
+                f"  - Track #{tid}: {name}, conf={int(conf * 100)}%{run}"
+            )
 
         anomaly_lines = []
         for a in req.anomalies[:10]:
-            anomaly_lines.append(f"  - {a.get('type','unknown')}: {a}")
+            anomaly_lines.append(f"  - {a.get('type', 'unknown')}: {a}")
 
         scene_text = (
             f"Source mode: {req.source_mode}\n"
             f"People detected: {req.person_count}\n"
             f"Objects detected: {req.object_count}\n"
-            f"Active tracks ({len(req.tracks)}):\n" + ("\n".join(track_lines) or "  none") + "\n"
-            f"Active anomalies ({len(req.anomalies)}):\n" + ("\n".join(anomaly_lines) or "  none")
+            f"Active tracks ({len(req.tracks)}):\n"
+            + ("\n".join(track_lines) or "  none")
+            + "\n"
+            f"Active anomalies ({len(req.anomalies)}):\n"
+            + ("\n".join(anomaly_lines) or "  none")
         )
 
         response = client.chat.completions.create(
@@ -1463,13 +1669,19 @@ async def ai_narrate(req: AINarrateRequest):
                         "Keep it concise and clear — this is a live ops summary."
                     ),
                 },
-                {"role": "user", "content": f"Describe this live scene:\n\n{scene_text}"},
+                {
+                    "role": "user",
+                    "content": f"Describe this live scene:\n\n{scene_text}",
+                },
             ],
         )
         narration = response.choices[0].message.content or ""
         return {"narration": narration}
     except Exception:
-        raise HTTPException(status_code=500, detail="Failed to generate narration. The AI service may be unavailable.")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate narration. The AI service may be unavailable.",
+        )
 
 
 # ─── WebSocket: dashboard data broadcast ──────────────────────────────────────
@@ -1494,6 +1706,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # ─── WebSocket: webcam frame receiver ────────────────────────────────────────
 
+
 @app.websocket("/ws/cam")
 async def webcam_ws(websocket: WebSocket):
     """Browser sends JPEG frames as binary; we queue them for YOLO processing."""
@@ -1516,8 +1729,9 @@ async def webcam_ws(websocket: WebSocket):
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 
-_static_dir = Path(__file__).parent.parent / "artifacts" / "company-ai" / "dist" / "public"
+_static_dir = (
+    Path(__file__).parent.parent / "artifacts" / "company-ai" / "dist" / "public"
+)
 
 if _static_dir.exists():
     app.mount("/", StaticFiles(directory=str(_static_dir), html=True), name="spa")
-
