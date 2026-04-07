@@ -1126,6 +1126,13 @@ _PRIVATE_HOSTNAMES = {"localhost", "localho.st"}
 
 def _validate_stream_url(url: str) -> str | None:
     """Return an error string if the URL is unsafe (SSRF guard), else None."""
+    # Always allow the built-in test stream served by our own process.
+    _TEST_STREAM_PATHS = {
+        "http://localhost:8080/api/stream/test-feed",
+        "http://127.0.0.1:8080/api/stream/test-feed",
+    }
+    if url in _TEST_STREAM_PATHS:
+        return None
     try:
         parsed = urlsplit(url)
     except Exception:

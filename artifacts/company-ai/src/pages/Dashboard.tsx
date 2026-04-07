@@ -2,6 +2,7 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import { useDetection } from "../context/DetectionContext";
 import { useAlertSound } from "../hooks/useAlertSound";
 import { useCamProcessor } from "../hooks/useCamProcessor";
+import { useLocalCamRelay } from "../hooks/useLocalCamRelay";
 import { useIsMobile } from "../hooks/use-mobile";
 import SimulationCanvas from "../components/SimulationCanvas";
 import StatsCards from "../components/StatsCards";
@@ -59,7 +60,7 @@ const PILL_STYLE = {
   flex: 1,
 };
 
-type ActivePanel = "none" | "video" | "stream";
+type ActivePanel = "none" | "video" | "stream" | "webcam";
 type SourceMode = "idle" | "webcam" | "video" | "stream";
 
 export default function Dashboard() {
@@ -86,6 +87,14 @@ export default function Dashboard() {
   const [webcamStatus, setWebcamStatus] = useState<WebcamStatusData | null>(null);
   const [restrictedZones, setRestrictedZones] = useState<RestrictedZone[]>([]);
   const [zoneEnabled, setZoneEnabled] = useState(true);
+
+  // Camera device enumeration (USB webcam selector)
+  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+
+  const [localCamUrl, setLocalCamUrl] = useState<string>("");
+
+  const localRelay = useLocalCamRelay();
 
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -155,6 +164,19 @@ export default function Dashboard() {
     return () => clearInterval(id);
   }, []);
 
+  // Enumerate camera devices on mount and whenever permissions change
+  useEffect(() => {
+    const enumerate = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        setCameraDevices(devices.filter(d => d.kind === "videoinput"));
+      } catch { /* browser may deny enumeration before permission is granted */ }
+    };
+    enumerate();
+    navigator.mediaDevices.addEventListener?.("devicechange", enumerate);
+    return () => navigator.mediaDevices.removeEventListener?.("devicechange", enumerate);
+  }, []);
+
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -173,17 +195,27 @@ export default function Dashboard() {
 
   // ── Webcam ──────────────────────────────────────────────────────────────────
 
-  const enableCamera = useCallback(async () => {
+  const enableCamera = useCallback(async (deviceId?: string) => {
     setCameraError(null);
     try {
       // Stop any existing tracks
       mediaStreamRef.current?.getTracks().forEach(t => t.stop());
 
+      const effectiveId = deviceId ?? selectedDeviceId;
+      const videoConstraints = effectiveId
+        ? { deviceId: { exact: effectiveId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        : { width: { ideal: 1280 }, height: { ideal: 720 } };
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: videoConstraints,
         audio: false,
       });
       mediaStreamRef.current = stream;
+      // Refresh device list now that permission is granted (labels become visible)
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        setCameraDevices(devices.filter(d => d.kind === "videoinput"));
+      } catch { /* ignore */ }
 
       // Reuse existing video element or create once
       if (!videoElRef.current) {
@@ -203,24 +235,48 @@ export default function Dashboard() {
       }
 
       setSourceMode("webcam");
+      setActivePanel("none");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Camera access denied";
       setCameraError(msg);
       mediaStreamRef.current?.getTracks().forEach(t => t.stop());
       mediaStreamRef.current = null;
     }
-  }, []);
+  }, [selectedDeviceId]);
+
+  const stopLocalCam = useCallback(async () => {
+    localRelay.stop();
+    await fetch("/api/webcam/stop", { method: "POST" }).catch(() => {});
+    setSourceMode("idle");
+  }, [localRelay]);
+
+  const startLocalCam = useCallback(async () => {
+    const url = localCamUrl.trim();
+    if (!url) return;
+    await localRelay.start(url, async () => {
+      const res = await fetch("/api/webcam/start", { method: "POST" });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.detail ?? "Could not start backend processing");
+      }
+    });
+    setSourceMode("webcam");
+    setActivePanel("none");
+  }, [localCamUrl, localRelay]);
 
   const disableCamera = useCallback(async () => {
+    // Stop USB stream if active
     mediaStreamRef.current?.getTracks().forEach(t => t.stop());
     mediaStreamRef.current = null;
     if (videoElRef.current) {
       videoElRef.current.srcObject = null;
     }
+    // Stop local relay if active
+    localRelay.stop();
     await fetch("/api/webcam/stop", { method: "POST" }).catch(() => {});
     setSourceMode("idle");
     setCameraError(null);
-  }, []);
+  }, [localRelay]);
 
   // ── Video upload ─────────────────────────────────────────────────────────────
 
@@ -453,19 +509,19 @@ export default function Dashboard() {
           )}
 
           {/* Webcam button */}
-          {cameraError && (
-            <span style={{ fontSize: 11, color: "#ef4444", maxWidth: 160 }}>{cameraError}</span>
-          )}
           <button
-            onClick={sourceMode === "webcam" ? disableCamera : enableCamera}
+            onClick={() => {
+              if (sourceMode === "webcam") { disableCamera(); }
+              else { setActivePanel(p => p === "webcam" ? "none" : "webcam"); }
+            }}
             disabled={isVideoProcessing || isStreaming}
             style={{
               display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 8,
               border: "1px solid", cursor: (isVideoProcessing || isStreaming) ? "not-allowed" : "pointer",
               fontSize: 12, fontWeight: 600, transition: "all 0.2s",
-              borderColor: sourceMode === "webcam" ? "#10b981" : "rgba(255,255,255,0.12)",
-              background: sourceMode === "webcam" ? "rgba(16,185,129,0.12)" : "rgba(255,255,255,0.04)",
-              color: sourceMode === "webcam" ? "#10b981" : "#94a3b8",
+              borderColor: sourceMode === "webcam" ? "#10b981" : activePanel === "webcam" ? "#10b981" : "rgba(255,255,255,0.12)",
+              background: sourceMode === "webcam" ? "rgba(16,185,129,0.12)" : activePanel === "webcam" ? "rgba(16,185,129,0.06)" : "rgba(255,255,255,0.04)",
+              color: sourceMode === "webcam" ? "#10b981" : activePanel === "webcam" ? "#10b981" : "#94a3b8",
               opacity: (isVideoProcessing || isStreaming) ? 0.4 : 1,
             }}
           >
@@ -667,7 +723,156 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Stream Panel ── */}
+      {/* ── Webcam / Local Camera Panel ── */}
+      {activePanel === "webcam" && (
+        <div style={{
+          background: "rgba(16,185,129,0.04)", border: "1px solid rgba(16,185,129,0.2)",
+          borderRadius: 14, padding: 20, marginBottom: 20,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 9, color: "#10b981", letterSpacing: 2, fontWeight: 700 }}>
+              LIVE CAMERA · YOLO11m REAL-TIME DETECTION
+            </div>
+            <button onClick={() => setActivePanel("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#475569" }}>
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* ── USB / Built-in Camera ── */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+              <Camera size={13} /> USB / Built-in Camera
+            </div>
+            {cameraError && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 8 }}>{cameraError}</div>}
+            {cameraDevices.length > 1 ? (
+              <select
+                value={selectedDeviceId}
+                onChange={e => setSelectedDeviceId(e.target.value)}
+                style={{
+                  width: "100%", padding: "8px 12px", borderRadius: 8, marginBottom: 10,
+                  background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                  color: "#f1f5f9", fontSize: 12, outline: "none", cursor: "pointer",
+                }}
+              >
+                <option value="">Auto-select (default)</option>
+                {cameraDevices.map(d => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label || `Camera ${d.deviceId.slice(0, 8)}…`}
+                  </option>
+                ))}
+              </select>
+            ) : cameraDevices.length === 0 ? (
+              <div style={{ fontSize: 11, color: "#475569", marginBottom: 10 }}>
+                No cameras detected yet — starting will prompt browser permission.
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, color: "#64748b", marginBottom: 10 }}>
+                {cameraDevices[0]?.label || "Default camera detected"}
+              </div>
+            )}
+            <button
+              onClick={() => enableCamera()}
+              disabled={isVideoProcessing || isStreaming}
+              style={{
+                display: "flex", alignItems: "center", gap: 8, padding: "8px 18px", borderRadius: 8,
+                border: "none", cursor: "pointer",
+                background: "linear-gradient(135deg,#059669,#10b981)", color: "#fff", fontWeight: 700, fontSize: 13,
+              }}
+            >
+              <Camera size={14} /> Start USB Camera
+            </button>
+          </div>
+
+          <hr style={{ border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", marginBottom: 16 }} />
+
+          {/* ── Local IP Camera (MJPEG Relay) ── */}
+          <div>
+            <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+              <Radio size={13} /> Local Network Camera — Browser MJPEG Relay
+            </div>
+            <div style={{
+              fontSize: 11, color: "#78350f", background: "rgba(245,158,11,0.07)",
+              border: "1px solid rgba(245,158,11,0.2)", borderRadius: 7, padding: "8px 10px", marginBottom: 10, lineHeight: 1.6,
+            }}>
+              <strong style={{ color: "#f59e0b" }}>How this works:</strong> The Replit cloud server can't reach
+              your campus/home network, but <em>your browser can</em>. Enter the camera's HTTP URL and your browser
+              will relay frames directly to the AI engine via WebSocket.{" "}
+              <strong style={{ color: "#f59e0b" }}>Requires CORS</strong> — enable "Cross-Origin Access" in
+              the camera admin page, or use a <code style={{ color: "#38bdf8" }}>/snapshot.jpg</code> URL (CORS-free).
+            </div>
+            <div style={{ fontSize: 10, color: "#334155", marginBottom: 10, lineHeight: 1.9 }}>
+              <strong style={{ color: "#64748b" }}>Common camera URLs:</strong><br />
+              Hikvision MJPEG: <code style={{ color: "#38bdf8" }}>http://IP/video.cgi?user=admin&pwd=pass</code><br />
+              Dahua MJPEG: <code style={{ color: "#38bdf8" }}>http://IP/cgi-bin/mjpg/video.cgi?channel=0</code><br />
+              Generic MJPEG: <code style={{ color: "#38bdf8" }}>http://IP/stream</code> · <code style={{ color: "#38bdf8" }}>http://IP/video.mjpg</code><br />
+              Snapshot (no CORS): <code style={{ color: "#38bdf8" }}>http://IP/snapshot.jpg</code> · <code style={{ color: "#38bdf8" }}>http://IP/image.jpg</code>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <div style={{ position: "relative", flex: 1 }}>
+                <Link size={13} color="#64748b" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+                <input
+                  type="text"
+                  value={localCamUrl}
+                  onChange={e => setLocalCamUrl(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && localRelay.state === "idle" && startLocalCam()}
+                  placeholder="http://192.168.x.x/stream  or  /snapshot.jpg"
+                  disabled={localRelay.state === "active" || localRelay.state === "connecting"}
+                  style={{
+                    width: "100%", padding: "9px 12px 9px 32px", borderRadius: 8, boxSizing: "border-box",
+                    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)",
+                    color: "#f1f5f9", fontSize: 12, outline: "none",
+                  }}
+                />
+              </div>
+              {localRelay.state !== "active" && localRelay.state !== "connecting" ? (
+                <button
+                  onClick={startLocalCam}
+                  disabled={!localCamUrl.trim()}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: 8,
+                    border: "none", cursor: localCamUrl.trim() ? "pointer" : "not-allowed",
+                    background: localCamUrl.trim() ? "linear-gradient(135deg,#0369a1,#38bdf8)" : "#1c2a3a",
+                    color: "#fff", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap",
+                  }}
+                >
+                  <Radio size={14} /> Relay
+                </button>
+              ) : (
+                <button
+                  onClick={stopLocalCam}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: 8,
+                    border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)",
+                    color: "#ef4444", fontWeight: 700, fontSize: 13, outline: "1px solid rgba(239,68,68,0.3)",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <StopCircle size={14} /> Stop
+                </button>
+              )}
+            </div>
+            {localRelay.state === "connecting" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11 }}>
+                <Loader size={13} color="#38bdf8" style={{ animation: "spin 1s linear infinite" }} />
+                <span style={{ color: "#38bdf8" }}>Connecting to camera…</span>
+              </div>
+            )}
+            {localRelay.state === "active" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11 }}>
+                <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981", animation: "pulse-ring 1.4s infinite" }} />
+                <span style={{ color: "#10b981" }}>Relaying frames — YOLO11m processing live</span>
+              </div>
+            )}
+            {localRelay.error && (
+              <div style={{ color: "#ef4444", fontSize: 11, marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                {localRelay.error}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Stream Panel (Internet / Cloud-reachable sources) ── */}
       {activePanel === "stream" && (
         <div style={{
           background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.2)",
@@ -675,14 +880,14 @@ export default function Dashboard() {
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <div style={{ fontSize: 9, color: "#f59e0b", letterSpacing: 2, fontWeight: 700 }}>
-              LIVE STREAM DETECTION · RTSP / HTTP / IP CAMERA
+              INTERNET STREAM · RTSP / HTTP — YOLO11m REAL-TIME
             </div>
             <button onClick={() => setActivePanel("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#475569" }}>
               <X size={16} />
             </button>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 11 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, fontSize: 11 }}>
             {streamStatus?.model_ready ? (
               <><CheckCircle size={13} color="#10b981" /><span style={{ color: "#10b981" }}>YOLO11m ready</span></>
             ) : streamStatus?.model_error ? (
@@ -693,80 +898,81 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>
-              Enter a video stream or file URL. Examples:
-            </div>
-            <div style={{
-              fontSize: 11, color: "#92400e", background: "rgba(245,158,11,0.08)",
-              border: "1px solid rgba(245,158,11,0.2)", borderRadius: 7, padding: "7px 10px", marginBottom: 10,
-            }}>
-              ⚠ <strong style={{ color: "#f59e0b" }}>RTSP/MJPEG availability depends on network reachability</strong>
-              {" "} (camera online, open port, firewall/ISP rules). If a source fails, try a different URL or use
-              <strong> HTTP MP4</strong> for pipeline verification. HTTP MP4 files loop automatically.
-            </div>
-            <div style={{ fontSize: 10, color: "#334155", marginBottom: 10, lineHeight: 1.8 }}>
-              <code style={{ color: "#10b981" }}>http://IP:PORT/video</code> — HTTP MJPEG camera ✓<br />
-              <code style={{ color: "#10b981" }}>https://example.com/video.mp4</code> — HTTP MP4 file (loops) ✓<br />
-              <code style={{ color: "#475569" }}>rtsp://192.168.1.100:554/stream</code> — RTSP (must be reachable) ✗
-            </div>
-            <button
-              onClick={() => setStreamUrl("http://localhost:8080/api/stream/test-feed")}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                marginBottom: 12, padding: "5px 12px", borderRadius: 6,
-                border: "1px solid rgba(16,185,129,0.3)", background: "rgba(16,185,129,0.08)",
-                color: "#10b981", fontSize: 11, fontWeight: 600, cursor: "pointer",
-              }}
-            >
-              ⚡ Fill built-in test stream URL
-            </button>
-            <div style={{ display: "flex", gap: 8 }}>
-              <div style={{ position: "relative", flex: 1 }}>
-                <Link size={13} color="#64748b" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
-                <input
-                  type="text"
-                  value={streamUrl}
-                  onChange={e => setStreamUrl(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && !isStreaming && startStream()}
-                  placeholder="rtsp:// or http:// stream URL"
-                  disabled={isStreaming}
-                  style={{
-                    width: "100%", padding: "9px 12px 9px 32px", borderRadius: 8, boxSizing: "border-box",
-                    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)",
-                    color: "#f1f5f9", fontSize: 12, outline: "none",
-                  }}
-                />
-              </div>
-              {!isStreaming ? (
-                <button onClick={startStream} disabled={!streamStatus?.model_ready} style={{
-                  display: "flex", alignItems: "center", gap: 8, padding: "9px 18px", borderRadius: 8,
-                  border: "none", cursor: streamStatus?.model_ready ? "pointer" : "not-allowed",
-                  background: streamStatus?.model_ready ? "linear-gradient(135deg,#d97706,#f59e0b)" : "#1c1a10",
-                  color: "#fff", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap",
-                }}>
-                  <Radio size={14} /> Connect
-                </button>
-              ) : (
-                <button onClick={stopStream} style={{
-                  display: "flex", alignItems: "center", gap: 8, padding: "9px 18px", borderRadius: 8,
-                  border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)",
-                  color: "#ef4444", fontWeight: 700, fontSize: 13, outline: "1px solid rgba(239,68,68,0.3)",
-                  whiteSpace: "nowrap",
-                }}>
-                  <StopCircle size={14} /> Disconnect
-                </button>
-              )}
-            </div>
+          <div style={{
+            fontSize: 11, color: "#78350f", background: "rgba(245,158,11,0.07)",
+            border: "1px solid rgba(245,158,11,0.2)", borderRadius: 7, padding: "8px 10px", marginBottom: 12, lineHeight: 1.6,
+          }}>
+            ⚠ <strong style={{ color: "#f59e0b" }}>The cloud backend connects to this URL</strong> — the stream must be
+            publicly reachable (open port, public IP, or hosted URL). For cameras on your{" "}
+            <strong>local network</strong>, use <strong>Live Webcam → Local IP Camera</strong> instead.
           </div>
 
-          {streamError && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 8 }}>{streamError}</div>}
-          {streamStatus?.error && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 8 }}>Stream error: {streamStatus.error}</div>}
+          <div style={{ fontSize: 10, color: "#334155", marginBottom: 10, lineHeight: 1.9 }}>
+            <code style={{ color: "#10b981" }}>https://example.com/live.mp4</code> — HTTP MP4/MJPEG (loops) ✓<br />
+            <code style={{ color: "#10b981" }}>rtsp://user:pass@public-ip:554/stream</code> — RTSP via internet ✓<br />
+            <code style={{ color: "#475569" }}>rtsp://192.168.x.x/stream</code> — local IP (not cloud-reachable) ✗
+          </div>
+
+          <button
+            onClick={() => setStreamUrl("http://localhost:8080/api/stream/test-feed")}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              marginBottom: 10, padding: "5px 12px", borderRadius: 6,
+              border: "1px solid rgba(16,185,129,0.3)", background: "rgba(16,185,129,0.08)",
+              color: "#10b981", fontSize: 11, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            ⚡ Fill built-in test stream
+          </button>
+
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <Link size={13} color="#64748b" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                type="text"
+                value={streamUrl}
+                onChange={e => setStreamUrl(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && !isStreaming && startStream()}
+                placeholder="rtsp:// or https:// stream URL"
+                disabled={isStreaming}
+                style={{
+                  width: "100%", padding: "9px 12px 9px 32px", borderRadius: 8, boxSizing: "border-box",
+                  background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)",
+                  color: "#f1f5f9", fontSize: 12, outline: "none",
+                }}
+              />
+            </div>
+            {!isStreaming ? (
+              <button onClick={startStream} disabled={!streamStatus?.model_ready} style={{
+                display: "flex", alignItems: "center", gap: 8, padding: "9px 18px", borderRadius: 8,
+                border: "none", cursor: streamStatus?.model_ready ? "pointer" : "not-allowed",
+                background: streamStatus?.model_ready ? "linear-gradient(135deg,#d97706,#f59e0b)" : "#1c1a10",
+                color: "#fff", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap",
+              }}>
+                <Radio size={14} /> Connect
+              </button>
+            ) : (
+              <button onClick={stopStream} style={{
+                display: "flex", alignItems: "center", gap: 8, padding: "9px 18px", borderRadius: 8,
+                border: "none", cursor: "pointer", background: "rgba(239,68,68,0.15)",
+                color: "#ef4444", fontWeight: 700, fontSize: 13, outline: "1px solid rgba(239,68,68,0.3)",
+                whiteSpace: "nowrap",
+              }}>
+                <StopCircle size={14} /> Disconnect
+              </button>
+            )}
+          </div>
+
+          {(streamError || streamStatus?.error) && (
+            <div style={{ color: "#ef4444", fontSize: 12 }}>
+              {streamError ?? `Stream error: ${streamStatus?.error}`}
+            </div>
+          )}
 
           {isStreaming && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 11 }}>
               <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", boxShadow: "0 0 8px #f59e0b", animation: "pulse-ring 1.4s infinite" }} />
-              <span style={{ color: "#f59e0b" }}>Stream active — processing with YOLO11m</span>
+              <span style={{ color: "#f59e0b" }}>Stream active — YOLO11m processing</span>
             </div>
           )}
         </div>
