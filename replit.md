@@ -65,6 +65,25 @@ Full-stack real-time surveillance and anomaly detection system. A Python FastAPI
 - **Backend**: `Start application` workflow — uvicorn on port 8080
 - Frontend proxies `/api` and `/ws` to the Python backend
 
+## Running Locally (on your own laptop)
+
+This is required for connecting **campus/home IP cameras** since the cloud backend cannot reach private networks.
+
+```bash
+# Terminal 1 — Backend
+ALLOW_LOCAL_STREAMS=true uv run uvicorn backend.main:app --host 0.0.0.0 --port 8080 --reload
+
+# Terminal 2 — Frontend
+pnpm --filter @workspace/company-ai run dev
+```
+
+Then open `http://localhost:3000` in your browser.
+
+`ALLOW_LOCAL_STREAMS=true` removes the private-IP restriction so you can connect:
+- Campus RTSP cameras: `rtsp://admin:pass@192.168.x.x:554/stream` → paste in **Live Stream** panel
+- Campus MJPEG cameras: `http://192.168.x.x/video.cgi` → paste in **Live Webcam → Local Network Camera**
+- Snapshot URL (no CORS needed): `http://192.168.x.x/snapshot.jpg` → same section above
+
 ## API Endpoints
 
 - `GET /api/health` — health check

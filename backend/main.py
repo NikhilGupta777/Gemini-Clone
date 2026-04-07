@@ -1123,6 +1123,11 @@ class StreamRequest(BaseModel):
 _ALLOWED_STREAM_SCHEMES = {"rtsp", "rtsps", "http", "https"}
 _PRIVATE_HOSTNAMES = {"localhost", "localho.st"}
 
+# Set ALLOW_LOCAL_STREAMS=true when running locally to connect campus/home
+# IP cameras (192.168.x.x, 10.x.x.x, rtsp://local-ip, etc.).
+# Never set this in cloud/production — it disables the SSRF guard.
+_ALLOW_LOCAL_STREAMS = os.environ.get("ALLOW_LOCAL_STREAMS", "").lower() in {"1", "true", "yes"}
+
 
 def _validate_stream_url(url: str) -> str | None:
     """Return an error string if the URL is unsafe (SSRF guard), else None."""
@@ -1142,6 +1147,9 @@ def _validate_stream_url(url: str) -> str | None:
     host = (parsed.hostname or "").lower().rstrip(".")
     if not host:
         return "URL has no host"
+    # If running locally, skip private IP restrictions so campus/home cameras work.
+    if _ALLOW_LOCAL_STREAMS:
+        return None
     if host in _PRIVATE_HOSTNAMES or host.endswith(".local"):
         return "Stream URL targets a local address"
     try:
