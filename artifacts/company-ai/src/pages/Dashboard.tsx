@@ -401,9 +401,9 @@ export default function Dashboard() {
             Live Surveillance Dashboard
           </h1>
           <p style={{ color: "#475569", fontSize: isMobile ? 11 : 13 }}>
-            {displayMode === "video"  && "YOLO11n + SORT — processing uploaded video"}
-            {displayMode === "webcam" && "YOLO11n + SORT — real-time webcam detection"}
-            {displayMode === "stream" && `YOLO11n + SORT — live stream: ${streamStatus?.url ?? ""}`}
+            {displayMode === "video"  && "YOLO11m + SORT — processing uploaded video"}
+            {displayMode === "webcam" && "YOLO11m + SORT — real-time webcam detection"}
+            {displayMode === "stream" && `YOLO11m + SORT — live stream: ${streamStatus?.url ?? ""}`}
             {(displayMode === "idle" || !displayMode) && "Select a source — webcam, video upload, or live stream"}
           </p>
         </div>
@@ -570,7 +570,7 @@ export default function Dashboard() {
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <div style={{ fontSize: 9, color: "#a855f7", letterSpacing: 2, fontWeight: 700 }}>
-              YOLO11n REAL DETECTION · UPLOAD VIDEO FILE
+              YOLO11m REAL DETECTION · UPLOAD VIDEO FILE
             </div>
             <button onClick={() => setActivePanel("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#475569" }}>
               <X size={16} />
@@ -580,12 +580,12 @@ export default function Dashboard() {
           {/* Model status */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 11 }}>
             {modelReady ? (
-              <><CheckCircle size={13} color="#10b981" /><span style={{ color: "#10b981" }}>YOLO11n ready</span></>
+              <><CheckCircle size={13} color="#10b981" /><span style={{ color: "#10b981" }}>YOLO11m ready</span></>
             ) : modelError ? (
               <><X size={13} color="#ef4444" /><span style={{ color: "#ef4444" }}>Model error: {modelError}</span></>
             ) : (
               <><Loader size={13} color="#f59e0b" style={{ animation: "spin 1s linear infinite" }} />
-              <span style={{ color: "#f59e0b" }}>Loading YOLO11n (~5 MB, one-time download)…</span></>
+              <span style={{ color: "#f59e0b" }}>Loading YOLO11m (~10 MB, one-time download)…</span></>
             )}
           </div>
 
@@ -684,12 +684,12 @@ export default function Dashboard() {
 
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontSize: 11 }}>
             {streamStatus?.model_ready ? (
-              <><CheckCircle size={13} color="#10b981" /><span style={{ color: "#10b981" }}>YOLO11n ready</span></>
+              <><CheckCircle size={13} color="#10b981" /><span style={{ color: "#10b981" }}>YOLO11m ready</span></>
             ) : streamStatus?.model_error ? (
               <><X size={13} color="#ef4444" /><span style={{ color: "#ef4444" }}>Model error: {streamStatus.model_error}</span></>
             ) : (
               <><Loader size={13} color="#f59e0b" style={{ animation: "spin 1s linear infinite" }} />
-              <span style={{ color: "#f59e0b" }}>Loading YOLO11n…</span></>
+              <span style={{ color: "#f59e0b" }}>Loading YOLO11m…</span></>
             )}
           </div>
 
@@ -766,7 +766,7 @@ export default function Dashboard() {
           {isStreaming && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 11 }}>
               <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", boxShadow: "0 0 8px #f59e0b", animation: "pulse-ring 1.4s infinite" }} />
-              <span style={{ color: "#f59e0b" }}>Stream active — processing with YOLO11n</span>
+              <span style={{ color: "#f59e0b" }}>Stream active — processing with YOLO11m</span>
             </div>
           )}
         </div>

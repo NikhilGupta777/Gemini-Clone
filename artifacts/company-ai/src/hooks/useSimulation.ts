@@ -9,7 +9,7 @@ export interface Track {
   class_id: number;
   class_name: string;
   running: boolean;
-  confidence?: number;   // real value from YOLO11n, undefined in simulation
+  confidence?: number;   // real value from YOLO11m, undefined in simulation
   zone?: "A" | "B" | "C";
 }
 

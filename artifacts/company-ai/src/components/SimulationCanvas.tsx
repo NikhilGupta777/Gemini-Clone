@@ -149,7 +149,7 @@ function SimulationCanvas({
         ctx.fillText(msg, W / 2 - ctx.measureText(msg).width / 2, H / 2);
         ctx.font = "500 11px monospace";
         ctx.fillStyle = "#0f1f3d";
-        const sub = "YOLO11n + SORT  ·  Real-time anomaly detection engine";
+        const sub = "YOLO11m + SORT  ·  Real-time anomaly detection engine";
         ctx.fillText(sub, W / 2 - ctx.measureText(sub).width / 2, H / 2 + 22);
         ctx.globalAlpha = 1;
       }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useIsMobile } from "../hooks/use-mobile";
 import {
   CheckCircle,
   Clock,
@@ -206,6 +207,7 @@ function ToggleCard({
 }
 
 export default function Settings() {
+  const isMobile = useIsMobile();
   const [config, setConfig] = useState<Config>(DEFAULT_CONFIG);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -292,7 +294,7 @@ export default function Settings() {
         <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 12 }}>{saveError}</div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
         <div
           style={{
             background: "rgba(255,255,255,0.025)",
@@ -398,7 +400,7 @@ export default function Settings() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
         <div
           style={{
             background: "rgba(255,255,255,0.025)",
@@ -471,7 +473,7 @@ export default function Settings() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
         <div
           style={{
             background: "rgba(255,255,255,0.025)",
@@ -608,7 +610,7 @@ export default function Settings() {
         </div>
 
         <div style={{ fontSize: 11, color: "#1e3a5f", marginTop: 14 }}>
-          Person and unattended-object classes are tracked by YOLO11n plus SORT. Fall, restricted-zone, and
+          Person and unattended-object classes are tracked by YOLO11m plus SORT. Fall, restricted-zone, and
           fight-suspicion prototype settings are active immediately after applying this configuration.
         </div>
       </div>

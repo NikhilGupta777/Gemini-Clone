@@ -67,6 +67,17 @@ interface ChartBucket {
   manual_snapshot: number;
 }
 
+function escapeCsvValue(value: string | number | undefined | null): string {
+  if (value === null || value === undefined) return "";
+  const str = String(value);
+  // Prefix formula-injection characters with a single quote so spreadsheets
+  // treat them as plain text rather than formula starters.
+  if (/^[=+\-@\t\r]/.test(str)) return `'${str}`;
+  // Wrap in double quotes if the value contains a comma, newline, or quote.
+  if (/[,"\n\r]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+  return str;
+}
+
 function exportCSV(alerts: AlertRecord[]) {
   const headers = [
     "Time",
@@ -91,23 +102,23 @@ function exportCSV(alerts: AlertRecord[]) {
   const rows = alerts.map((record) => {
     const meta = TYPE_META[record.anomaly.type];
     return [
-      new Date(record.timestamp * 1000).toLocaleTimeString("en-IN"),
-      record.iso,
-      meta?.label ?? record.anomaly.type,
-      meta?.severity ?? "INFO",
-      record.anomaly.track_id ?? "",
-      record.anomaly.track_ids ? record.anomaly.track_ids.join("-") : "",
-      record.anomaly.count ?? "",
-      record.anomaly.avg_speed ?? "",
-      record.anomaly.avg_pair_speed ?? "",
-      record.anomaly.distance ?? "",
-      record.anomaly.duration ?? "",
-      record.anomaly.aspect_ratio ?? "",
-      record.anomaly.zone_name ?? record.anomaly.zone_id ?? "",
-      record.anomaly.position ? Math.round(record.anomaly.position[0]) : "",
-      record.anomaly.position ? Math.round(record.anomaly.position[1]) : "",
-      (record.source ?? "live").toUpperCase(),
-      record.snapshot_url ? `${window.location.origin}${record.snapshot_url}` : "",
+      escapeCsvValue(new Date(record.timestamp * 1000).toLocaleTimeString("en-IN")),
+      escapeCsvValue(record.iso),
+      escapeCsvValue(meta?.label ?? record.anomaly.type),
+      escapeCsvValue(meta?.severity ?? "INFO"),
+      escapeCsvValue(record.anomaly.track_id),
+      escapeCsvValue(record.anomaly.track_ids ? record.anomaly.track_ids.join("-") : ""),
+      escapeCsvValue(record.anomaly.count),
+      escapeCsvValue(record.anomaly.avg_speed),
+      escapeCsvValue(record.anomaly.avg_pair_speed),
+      escapeCsvValue(record.anomaly.distance),
+      escapeCsvValue(record.anomaly.duration),
+      escapeCsvValue(record.anomaly.aspect_ratio),
+      escapeCsvValue(record.anomaly.zone_name ?? record.anomaly.zone_id ?? ""),
+      escapeCsvValue(record.anomaly.position ? Math.round(record.anomaly.position[0]) : ""),
+      escapeCsvValue(record.anomaly.position ? Math.round(record.anomaly.position[1]) : ""),
+      escapeCsvValue((record.source ?? "live").toUpperCase()),
+      escapeCsvValue(record.snapshot_url ? `${window.location.origin}${record.snapshot_url}` : ""),
     ].join(",");
   });
 

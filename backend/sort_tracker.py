@@ -3,9 +3,17 @@ SORT: Simple Online and Realtime Tracking
 Translated from the original SORT paper implementation.
 Uses Kalman filtering (filterpy) + Hungarian algorithm (scipy).
 """
+import threading
+
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 from filterpy.kalman import KalmanFilter
+
+# Module-level ID counter with a lock so multiple Sort instances
+# (video, webcam, stream) each get globally unique track IDs and
+# a reset() on one instance cannot cause ID collisions in another.
+_id_lock = threading.Lock()
+_id_counter = 0
 
 
 def _box_to_z(bbox):
@@ -88,8 +96,6 @@ def _associate(detections, predictions, iou_threshold=0.3):
 class KalmanBoxTracker:
     """Single object tracked with a Kalman filter. State: [cx,cy,s,r,vcx,vcy,vs]."""
 
-    _count = 0
-
     def __init__(self, bbox: list, class_id: int, confidence: float):
         self.kf = KalmanFilter(dim_x=7, dim_z=4)
         # State transition
@@ -116,8 +122,10 @@ class KalmanBoxTracker:
         self.kf.Q[4:, 4:] *= 0.01
         self.kf.x[:4] = _box_to_z(bbox)
 
-        self.id = KalmanBoxTracker._count + 1
-        KalmanBoxTracker._count += 1
+        global _id_counter
+        with _id_lock:
+            _id_counter += 1
+            self.id = _id_counter
 
         self.class_id = class_id
         self.confidence = confidence
@@ -229,4 +237,6 @@ class Sort:
     def reset(self):
         self.trackers = []
         self.frame_count = 0
-        KalmanBoxTracker._count = 0
+        # The global _id_counter is intentionally NOT reset here.
+        # Resetting it could cause ID collisions between concurrent Sort
+        # instances (video / webcam / stream) or across looped sessions.

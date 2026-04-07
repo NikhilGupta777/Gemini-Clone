@@ -246,10 +246,14 @@ function ChatTab() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch("/api/alerts/history?limit=50")
-      .then((r) => r.json())
-      .then((d) => setAlertHistory(d.alerts || []))
-      .catch(() => {});
+    const fetchHistory = () =>
+      fetch("/api/alerts/history?limit=50")
+        .then((r) => r.json())
+        .then((d) => setAlertHistory(d.alerts || []))
+        .catch(() => {});
+    fetchHistory();
+    const id = setInterval(fetchHistory, 15000);
+    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -471,14 +475,20 @@ function NarratorTab() {
     }
   };
 
+  // Keep a ref to the latest narrate function so the interval always
+  // calls the up-to-date version (with the current frame) without
+  // recreating the interval on every frame update.
+  const narrateRef = useRef(narrate);
+  useEffect(() => { narrateRef.current = narrate; });
+
   useEffect(() => {
     if (autoRefresh) {
-      timerRef.current = setInterval(narrate, 10000);
+      timerRef.current = setInterval(() => narrateRef.current(), 10000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [autoRefresh, frame]);
+  }, [autoRefresh]); // intentionally excludes frame — narrateRef handles currency
 
   const persons = frame?.tracks.filter((t) => t.class_id === 0).length ?? 0;
   const objects = frame?.tracks.filter((t) => t.class_id !== 0).length ?? 0;

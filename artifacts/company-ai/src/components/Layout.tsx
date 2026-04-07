@@ -134,7 +134,7 @@ function SidebarContent({ connected, onNavClick }: { connected: boolean; onNavCl
             flexShrink: 0,
           }} />
           <span style={{ fontSize: 10, color: "#475569" }}>
-            {connected ? "YOLO11n · SORT Tracking" : "Waiting for backend…"}
+            {connected ? "YOLO11m · SORT Tracking" : "Waiting for backend…"}
           </span>
         </div>
       </div>

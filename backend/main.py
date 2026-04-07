@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import ipaddress
 import json
 import math
 import os
@@ -8,7 +9,9 @@ import tempfile
 import time
 import threading
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
@@ -69,6 +72,10 @@ stats_snapshot = {
 _start_time = time.time()
 _frame_times: deque = deque(maxlen=30)
 _alert_cooldowns: dict = {}
+_COOLDOWN_MAX_AGE = 300.0  # seconds — entries older than this are evicted
+
+# Thread pool for async DB writes — avoids spawning a new thread per alert.
+_db_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="crowdlens_db")
 _ALERT_COOLDOWN_SECS = 5.0
 _alert_id_counter = 0
 _archive_dir = os.path.join(os.path.dirname(__file__), "archive")
@@ -122,7 +129,17 @@ def _get_zone(cx: float, frame_width: int) -> str:
     return "C"
 
 
+def _evict_stale_cooldowns(now: float) -> None:
+    """Remove cooldown entries older than _COOLDOWN_MAX_AGE to bound dict size."""
+    if len(_alert_cooldowns) < 500:
+        return
+    stale = [k for k, t in _alert_cooldowns.items() if now - t > _COOLDOWN_MAX_AGE]
+    for k in stale:
+        _alert_cooldowns.pop(k, None)
+
+
 def _should_record_alert(anomaly: dict, now: float) -> bool:
+    _evict_stale_cooldowns(now)
     key = (anomaly.get("type"), anomaly.get("track_id"))
     if now - _alert_cooldowns.get(key, 0) >= _ALERT_COOLDOWN_SECS:
         _alert_cooldowns[key] = now
@@ -237,7 +254,7 @@ def build_frame_payload(
                 "snapshot_url": snapshot_url,
             }
             alert_history.append(entry)
-            threading.Thread(target=_db._insert_alert_sync, args=(entry,), daemon=True).start()
+            _db_executor.submit(_db._insert_alert_sync, entry)
 
     return {
         "tracks": tracks,
@@ -477,7 +494,9 @@ async def stream_processing_loop(url: str):
 
     # Write FFmpeg stderr to a temp file to avoid pipe deadlock
     # (stderr fills the pipe buffer -> FFmpeg blocks -> stdout stalls).
-    _stderr_path = tempfile.mktemp(suffix=".ffmpeg_err.txt")
+    # mkstemp atomically creates the file (unlike the deprecated mktemp).
+    _stderr_fd, _stderr_path = tempfile.mkstemp(suffix=".ffmpeg_err.txt")
+    os.close(_stderr_fd)
     downloaded_file_path: str | None = None
     source_input = url
     tried_http_file_fallback = False
@@ -1101,20 +1120,50 @@ class StreamRequest(BaseModel):
     url: str
 
 
+_ALLOWED_STREAM_SCHEMES = {"rtsp", "rtsps", "http", "https"}
+_PRIVATE_HOSTNAMES = {"localhost", "localho.st"}
+
+
+def _validate_stream_url(url: str) -> str | None:
+    """Return an error string if the URL is unsafe (SSRF guard), else None."""
+    try:
+        parsed = urlsplit(url)
+    except Exception:
+        return "Malformed URL"
+    if parsed.scheme.lower() not in _ALLOWED_STREAM_SCHEMES:
+        return f"Scheme '{parsed.scheme}' is not allowed; use rtsp://, rtsps://, http://, or https://"
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if not host:
+        return "URL has no host"
+    if host in _PRIVATE_HOSTNAMES or host.endswith(".local"):
+        return "Stream URL targets a local address"
+    try:
+        addr = ipaddress.ip_address(host)
+        if addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_multicast:
+            return "Stream URL targets a private or internal network address"
+    except ValueError:
+        pass  # Not a raw IP — hostname is fine
+    return None
+
+
 @app.post("/api/stream/start")
 async def start_stream(body: StreamRequest):
     global _processing_mode, _active_task
     if not is_model_ready():
         raise HTTPException(503, "YOLO11m model not ready yet — please wait")
-    if not body.url.strip():
+    url = body.url.strip()
+    if not url:
         raise HTTPException(400, "Stream URL is required")
+    ssrf_error = _validate_stream_url(url)
+    if ssrf_error:
+        raise HTTPException(400, f"Invalid stream URL: {ssrf_error}")
 
     await _cancel_active()
     _reset_fps_window()
     _processing_mode = "stream"
-    stream_status["url"] = body.url.strip()
+    stream_status["url"] = url
     stream_status["error"] = None
-    _active_task = asyncio.create_task(stream_processing_loop(body.url.strip()))
+    _active_task = asyncio.create_task(stream_processing_loop(url))
     return {"success": True}
 
 
@@ -1314,8 +1363,8 @@ async def generate_ai_report(req: AIReportRequest):
         )
         report = response.choices[0].message.content or ""
         return {"report": report}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to generate report. The AI service may be unavailable.")
 
 
 @app.post("/api/ai/chat")
@@ -1353,8 +1402,8 @@ async def ai_chat(req: AIChatRequest):
                 if content:
                     yield f"data: {json.dumps({'content': content})}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        except Exception:
+            yield f"data: {json.dumps({'error': 'AI service error. Please try again.'})}\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -1404,11 +1453,14 @@ async def ai_narrate(req: AINarrateRequest):
         )
         narration = response.choices[0].message.content or ""
         return {"narration": narration}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to generate narration. The AI service may be unavailable.")
 
 
 # ─── WebSocket: dashboard data broadcast ──────────────────────────────────────
+
+_WS_MAX_MSG_BYTES = 4096  # Clients send nothing meaningful; cap to block abuse.
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -1416,7 +1468,10 @@ async def websocket_endpoint(websocket: WebSocket):
     connected_clients.append(websocket)
     try:
         while True:
-            await websocket.receive_text()
+            msg = await websocket.receive_text()
+            if len(msg) > _WS_MAX_MSG_BYTES:
+                await websocket.close(code=1009)  # 1009 = message too large
+                break
     except WebSocketDisconnect:
         if websocket in connected_clients:
             connected_clients.remove(websocket)
