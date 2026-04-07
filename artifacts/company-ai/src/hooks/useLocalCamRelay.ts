@@ -27,7 +27,11 @@
  */
 import { useCallback, useRef, useState } from "react";
 
-const SNAPSHOT_INTERVAL_MS = 300;   // ~3 fps for snapshot mode
+const SNAPSHOT_INTERVAL_MS = 200;   // ~5 fps for snapshot mode
+const MIN_FRAME_MS         = 200;   // max send rate to backend (5 fps) — DroidCam may
+                                    // stream at 15-20 fps; we parse all frames but only
+                                    // forward one every MIN_FRAME_MS to match CPU YOLO
+const WS_BACKLOG           = 64_000; // bytes — skip frame if WebSocket is backed up
 const RECONNECT_DELAY_MS   = 2000;  // pause before reconnecting camera
 const STALE_TIMEOUT_MS     = 6000;  // surface "stalled" error after 6 s with no frame
 const WS_RECONNECT_MS      = 2000;
@@ -59,7 +63,8 @@ export function useLocalCamRelay() {
   const wsReconnRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const camReconnRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const staleTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastFrameRef   = useRef<number>(0);
+  const lastFrameRef   = useRef<number>(0);  // timestamp of last successful frame (stale detection)
+  const lastSentRef    = useRef<number>(0);  // timestamp of last frame sent to backend (throttle)
   const snapshotRef    = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── cleanup helpers ───────────────────────────────────────────────────────
