@@ -261,7 +261,7 @@ export default function Dashboard() {
       }
     });
     setSourceMode("webcam");
-    setActivePanel("none");
+    // Keep panel open so status & errors remain visible
   }, [localCamUrl, localRelay]);
 
   const disableCamera = useCallback(async () => {
@@ -794,18 +794,17 @@ export default function Dashboard() {
               fontSize: 11, color: "#78350f", background: "rgba(245,158,11,0.07)",
               border: "1px solid rgba(245,158,11,0.2)", borderRadius: 7, padding: "8px 10px", marginBottom: 10, lineHeight: 1.6,
             }}>
-              <strong style={{ color: "#f59e0b" }}>How this works:</strong> The Replit cloud server can't reach
-              your campus/home network, but <em>your browser can</em>. Enter the camera's HTTP URL and your browser
-              will relay frames directly to the AI engine via WebSocket.{" "}
-              <strong style={{ color: "#f59e0b" }}>Requires CORS</strong> — enable "Cross-Origin Access" in
-              the camera admin page, or use a <code style={{ color: "#38bdf8" }}>/snapshot.jpg</code> URL (CORS-free).
+              <strong style={{ color: "#f59e0b" }}>How this works:</strong> Your browser fetches frames directly
+              from the camera and relays raw JPEG bytes to the AI engine via WebSocket — no canvas, no CORS restriction.
+              If DroidCam stops streaming, the relay <strong style={{ color: "#f59e0b" }}>auto-reconnects</strong> every 2 s.
+              Make sure HTTPS is <strong style={{ color: "#ef4444" }}>OFF</strong> in DroidCam → Settings → IP Webcam.
             </div>
             <div style={{ fontSize: 10, color: "#334155", marginBottom: 10, lineHeight: 1.9 }}>
-              <strong style={{ color: "#64748b" }}>Common camera URLs:</strong><br />
-              Hikvision MJPEG: <code style={{ color: "#38bdf8" }}>http://IP/video.cgi?user=admin&pwd=pass</code><br />
-              Dahua MJPEG: <code style={{ color: "#38bdf8" }}>http://IP/cgi-bin/mjpg/video.cgi?channel=0</code><br />
-              Generic MJPEG: <code style={{ color: "#38bdf8" }}>http://IP/stream</code> · <code style={{ color: "#38bdf8" }}>http://IP/video.mjpg</code><br />
-              Snapshot (no CORS): <code style={{ color: "#38bdf8" }}>http://IP/snapshot.jpg</code> · <code style={{ color: "#38bdf8" }}>http://IP/image.jpg</code>
+              <strong style={{ color: "#64748b" }}>DroidCam URLs (replace 192.168.1.8 with your phone's IP):</strong><br />
+              MJPEG stream: <code style={{ color: "#38bdf8" }}>http://192.168.1.8:4747/video</code><br />
+              Snapshot (more stable): <code style={{ color: "#38bdf8" }}>http://192.168.1.8:4747/shot.jpg</code><br />
+              <strong style={{ color: "#64748b" }}>Campus IP cameras:</strong><br />
+              Hikvision: <code style={{ color: "#38bdf8" }}>http://IP/video.cgi?user=admin&pwd=pass</code> · Dahua: <code style={{ color: "#38bdf8" }}>http://IP/cgi-bin/mjpg/video.cgi</code>
             </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
               <div style={{ position: "relative", flex: 1 }}>
@@ -815,7 +814,7 @@ export default function Dashboard() {
                   value={localCamUrl}
                   onChange={e => setLocalCamUrl(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && localRelay.state === "idle" && startLocalCam()}
-                  placeholder="http://192.168.x.x/stream  or  /snapshot.jpg"
+                  placeholder="http://192.168.1.8:4747/video  or  /shot.jpg"
                   disabled={localRelay.state === "active" || localRelay.state === "connecting"}
                   style={{
                     width: "100%", padding: "9px 12px 9px 32px", borderRadius: 8, boxSizing: "border-box",
