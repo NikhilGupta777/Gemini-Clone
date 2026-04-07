@@ -623,9 +623,20 @@ async def stream_processing_loop(url: str):
                 "10000000",
             ]
         elif source_input.lower().startswith(("http://", "https://")):
+            # Detect potential DroidCam or MJPEG streams to force format
+            is_mjpeg = "/video" in source_input.lower() or "mjpeg" in source_input.lower()
+            if is_mjpeg:
+                cmd += ["-f", "mjpeg"]
+
             cmd += [
                 "-user_agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "-timeout",
+                "5000000",
+                "-fflags",
+                "nobuffer+genpts+igndts",
+                "-flags",
+                "low_delay",
                 "-reconnect",
                 "1",
                 "-reconnect_streamed",
@@ -635,13 +646,13 @@ async def stream_processing_loop(url: str):
                 "-reconnect_at_eof",
                 "1",
                 "-reconnect_delay_max",
-                "5",
+                "2",
                 "-rw_timeout",
-                "30000000",
+                "5000000",
                 "-analyzeduration",
-                "10000000",
+                "500000",
                 "-probesize",
-                "10000000",
+                "500000",
             ]
         cmd += [
             "-i",
