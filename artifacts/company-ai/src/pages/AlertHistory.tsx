@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, BarChart2, Camera, Download, Filter, RefreshCw, ShieldAlert, UserRoundX, Users, Zap } from "lucide-react";
+import { AlertCircle, BarChart2, Camera, Download, Filter, RefreshCw, Search, ShieldAlert, Trash2, UserRoundX, Users, Zap } from "lucide-react";
 import { useIsMobile } from "../hooks/use-mobile";
 import { AlertRecord } from "../types";
 import {
@@ -53,6 +53,16 @@ function escapeCsvValue(value: string | number | undefined | null): string {
   // Wrap in double quotes if the value contains a comma, newline, or quote.
   if (/[,"\n\r]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
   return str;
+}
+
+function exportJSON(alerts: AlertRecord[]) {
+  const blob = new Blob([JSON.stringify(alerts, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `crowdlens_alerts_${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function exportCSV(alerts: AlertRecord[]) {
@@ -177,8 +187,11 @@ export default function AlertHistory() {
   const isMobile = useIsMobile();
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [filter, setFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState(false);
   const [showChart, setShowChart] = useState(!isMobile);
 
   const fetchHistory = async (showRefreshing = false) => {
@@ -203,9 +216,32 @@ export default function AlertHistory() {
     return () => clearInterval(interval);
   }, []);
 
-  const filtered = filter === "all"
-    ? alerts
-    : alerts.filter((record) => record.anomaly.type === filter);
+  const clearHistory = async () => {
+    if (!clearConfirm) { setClearConfirm(true); setTimeout(() => setClearConfirm(false), 3500); return; }
+    setClearing(true);
+    setClearConfirm(false);
+    try {
+      await fetch("/api/alerts/clear", { method: "POST" });
+      setAlerts([]);
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const q = searchQuery.trim().toLowerCase();
+  const filtered = alerts.filter((record) => {
+    if (filter !== "all" && record.anomaly.type !== filter) return false;
+    if (!q) return true;
+    const meta = TYPE_META[record.anomaly.type];
+    return (
+      (meta?.label ?? record.anomaly.type).toLowerCase().includes(q) ||
+      String(record.anomaly.track_id ?? "").includes(q) ||
+      (record.anomaly.zone_name ?? "").toLowerCase().includes(q) ||
+      (record.anomaly.zone_id ?? "").toLowerCase().includes(q) ||
+      renderDetails(record).toLowerCase().includes(q) ||
+      (record.source ?? "").toLowerCase().includes(q)
+    );
+  });
 
   const counts = alerts.reduce<Record<string, number>>((acc, record) => {
     acc[record.anomaly.type] = (acc[record.anomaly.type] || 0) + 1;
@@ -236,7 +272,7 @@ export default function AlertHistory() {
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
           <button
             onClick={() => setShowChart((v) => !v)}
             style={{
@@ -263,7 +299,21 @@ export default function AlertHistory() {
             }}
           >
             <Download size={13} />
-            {!isMobile && "Export CSV"}
+            {!isMobile && "CSV"}
+          </button>
+
+          <button
+            onClick={() => exportJSON(filtered)}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "7px 12px", borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.1)",
+              background: "rgba(255,255,255,0.04)",
+              color: "#64748b", cursor: "pointer", fontSize: 12,
+            }}
+          >
+            <Download size={13} />
+            {!isMobile && "JSON"}
           </button>
 
           <button
@@ -278,6 +328,23 @@ export default function AlertHistory() {
           >
             <RefreshCw size={13} style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }} />
             {!isMobile && "Refresh"}
+          </button>
+
+          <button
+            onClick={clearHistory}
+            disabled={clearing || alerts.length === 0}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "7px 12px", borderRadius: 8,
+              border: `1px solid ${clearConfirm ? "rgba(239,68,68,0.5)" : "rgba(255,255,255,0.1)"}`,
+              background: clearConfirm ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.04)",
+              color: clearConfirm ? "#ef4444" : "#64748b",
+              cursor: alerts.length === 0 ? "not-allowed" : "pointer",
+              fontSize: 12, transition: "all 0.2s",
+            }}
+          >
+            <Trash2 size={13} />
+            {!isMobile && (clearConfirm ? "Confirm Clear" : "Clear All")}
           </button>
         </div>
       </div>
@@ -373,6 +440,29 @@ export default function AlertHistory() {
         </div>
       )}
 
+      <div style={{ position: "relative", marginBottom: 12 }}>
+        <Search size={13} color="#475569" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+        <input
+          type="text"
+          placeholder="Search by type, track ID, zone, source…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{
+            width: "100%", boxSizing: "border-box",
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 8, padding: "8px 12px 8px 34px",
+            color: "#e2e8f0", fontSize: 13, outline: "none",
+          }}
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery("")}
+            style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
+          >×</button>
+        )}
+      </div>
+
       <div style={{
         display: "flex", alignItems: "center", gap: 8, marginBottom: 16,
         overflowX: isMobile ? "auto" : "visible",
@@ -454,7 +544,7 @@ export default function AlertHistory() {
                     style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}
                   >
                     <td style={{ padding: "11px 16px", color: "#475569", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12 }}>
-                      {new Date(record.timestamp * 1000).toLocaleTimeString()}
+                      {new Date(record.timestamp * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     </td>
                     <td style={{ padding: "11px 16px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

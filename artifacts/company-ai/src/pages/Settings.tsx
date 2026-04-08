@@ -28,6 +28,7 @@ interface Config {
   fight_min_pair_speed: number;
   fight_persistence_time: number;
   fight_min_hit_streak: number;
+  alert_cooldown_secs: number;
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -46,6 +47,7 @@ const DEFAULT_CONFIG: Config = {
   fight_min_pair_speed: 16,
   fight_persistence_time: 0.8,
   fight_min_hit_streak: 3,
+  alert_cooldown_secs: 5,
 };
 
 const COCO_CLASSES = [
@@ -544,6 +546,33 @@ export default function Settings() {
             onChange={(v) => setConfig((c) => ({ ...c, fight_min_hit_streak: v }))}
           />
         </div>
+      </div>
+
+      <div
+        style={{
+          background: "rgba(255,255,255,0.025)",
+          border: "1px solid rgba(255,255,255,0.07)",
+          borderRadius: 14,
+          padding: 24,
+          marginBottom: 20,
+        }}
+      >
+        <div style={{ fontSize: 9, color: "#475569", letterSpacing: 2, fontWeight: 700, marginBottom: 24 }}>
+          ALERT BEHAVIOUR
+        </div>
+
+        <PremiumSlider
+          label="Alert Cooldown"
+          description="Minimum seconds between repeat alerts of the same type for the same track. Lower values increase sensitivity; higher values reduce noise."
+          icon={Clock}
+          color="#3b82f6"
+          value={config.alert_cooldown_secs}
+          min={1}
+          max={60}
+          step={1}
+          onChange={(v) => setConfig((c) => ({ ...c, alert_cooldown_secs: v }))}
+          unit=" s"
+        />
       </div>
 
       <div

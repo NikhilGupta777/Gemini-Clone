@@ -85,6 +85,7 @@ current_config = {
     "fight_min_pair_speed": FIGHT_MIN_PAIR_SPEED,
     "fight_persistence_time": FIGHT_PERSISTENCE_TIME,
     "fight_min_hit_streak": FIGHT_MIN_HIT_STREAK,
+    "alert_cooldown_secs": _ALERT_COOLDOWN_SECS,
 }
 
 stats_snapshot = {
@@ -1168,10 +1169,12 @@ class ConfigUpdate(BaseModel):
     fight_min_pair_speed: float | None = None
     fight_persistence_time: float | None = None
     fight_min_hit_streak: int | None = None
+    alert_cooldown_secs: float | None = None
 
 
 @app.put("/api/config")
 def update_config(body: ConfigUpdate):
+    global _ALERT_COOLDOWN_SECS
     if body.overcrowding_threshold is not None:
         current_config["overcrowding_threshold"] = body.overcrowding_threshold
     if body.running_speed_threshold is not None:
@@ -1204,6 +1207,9 @@ def update_config(body: ConfigUpdate):
         current_config["fight_persistence_time"] = body.fight_persistence_time
     if body.fight_min_hit_streak is not None:
         current_config["fight_min_hit_streak"] = body.fight_min_hit_streak
+    if body.alert_cooldown_secs is not None:
+        _ALERT_COOLDOWN_SECS = max(0.5, float(body.alert_cooldown_secs))
+        current_config["alert_cooldown_secs"] = _ALERT_COOLDOWN_SECS
     _apply_config()
     return current_config
 

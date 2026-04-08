@@ -63,6 +63,8 @@ const PILL_STYLE = {
 type ActivePanel = "none" | "video" | "stream" | "webcam";
 type SourceMode = "idle" | "webcam" | "video" | "stream";
 
+const DASHBOARD_CRITICAL_TYPES = new Set(["fight_suspected", "fall_detected", "unattended_object", "restricted_zone"]);
+
 export default function Dashboard() {
   const { frame, connected } = useDetection();
   const isMobile = useIsMobile();
@@ -107,6 +109,16 @@ export default function Dashboard() {
 
   useAlertSound(anomalies, soundEnabled);
   const { permission: notifPermission, enabled: notifEnabled, requestPermission } = useNotifications(anomalies);
+
+  const criticalCount = anomalies.filter((a) => DASHBOARD_CRITICAL_TYPES.has(a.type)).length;
+  useEffect(() => {
+    if (criticalCount > 0) {
+      document.title = `\u26a0 CrowdLens \u2014 ${criticalCount} Alert${criticalCount > 1 ? "s" : ""}`;
+    } else {
+      document.title = "CrowdLens \u00b7 Campus AI";
+    }
+    return () => { document.title = "CrowdLens \u00b7 Campus AI"; };
+  }, [criticalCount]);
 
   useCamProcessor(
     sourceMode === "webcam" ? videoElRef : null,
