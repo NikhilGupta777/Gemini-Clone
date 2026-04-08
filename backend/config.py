@@ -13,9 +13,11 @@ INFER_WIDTH = 640
 INFER_HEIGHT = 360
 
 # Stream mode tuning:
-STREAM_FRAME_WIDTH = 1280
-STREAM_FRAME_HEIGHT = 720
-STREAM_TARGET_FPS = 12
+# Use inference resolution directly — 4× less raw data piped from FFmpeg,
+# eliminates the redundant resize before YOLO, and cuts pipe backlog.
+STREAM_FRAME_WIDTH = 640
+STREAM_FRAME_HEIGHT = 360
+STREAM_TARGET_FPS = 15
 STREAM_DETECTION_CONFIDENCE = 0.25
 
 # Detection confidence overrides per mode.

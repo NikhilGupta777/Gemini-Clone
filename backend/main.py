@@ -381,12 +381,15 @@ def _finalize_tracks(tracks: list, anomalies: list) -> list:
 
 
 def _encode_preview(frame) -> str:
-    """Encode a cv2 frame as a compact base64 JPEG for WebSocket transmission."""
+    """Encode a cv2 frame as a base64 JPEG for WebSocket transmission."""
     import cv2
 
-    # Resize down for efficient WebSocket transmission but maintain 16:9
-    frame = cv2.resize(frame, (640, 360))
-    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
+    h, w = frame.shape[:2]
+    # Only resize if not already at the target resolution — avoids a redundant
+    # copy when stream frames are already piped at 640×360.
+    if w != 640 or h != 360:
+        frame = cv2.resize(frame, (640, 360))
+    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
     return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
@@ -943,6 +946,7 @@ async def webcam_processing_loop():
         return
 
     print("[webcam] Webcam processing loop started")
+    loop = asyncio.get_event_loop()
 
     try:
         while True:
@@ -963,8 +967,11 @@ async def webcam_processing_loop():
                 continue
 
             frame = cv2.resize(frame, (INFER_WIDTH, INFER_HEIGHT))
-            detections = detector.detect(
-                frame, conf_override=WEBCAM_DETECTION_CONFIDENCE
+            # Run YOLO in thread pool — keeps the asyncio event loop responsive.
+            # Without this the entire server freezes for ~200 ms every frame,
+            # blocking WebSocket sends and making all modes choppy.
+            detections = await loop.run_in_executor(
+                None, lambda f=frame: detector.detect(f, conf_override=WEBCAM_DETECTION_CONFIDENCE)
             )
             raw_tracks = tracker.update(detections)
 
