@@ -1,9 +1,9 @@
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
 
-# YOLO11m — Stepping up to the medium architecture for deep crowd analysis.
-# Slightly more compute but captures distant and occluded objects accurately.
-YOLO_MODEL = "yolo11m.pt"
+# YOLO11n — Nano model for real-time CPU inference (~10× faster than medium).
+# Already exported as yolo11n.onnx so startup is instant.
+YOLO_MODEL = "yolo11n.pt"
 CONFIDENCE_THRESHOLD = 0.25
 
 # Inference resolution for video / webcam modes.
