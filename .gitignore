@@ -60,5 +60,8 @@ Thumbs.db
 backend/archive/
 backend/*.db
 backend/*.db-journal
+backend/*.db-shm
+backend/*.db-wal
 crowdlens_upload.mp4
 
+.env

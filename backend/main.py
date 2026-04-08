@@ -12,6 +12,8 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
+from dotenv import load_dotenv
+load_dotenv()
 
 import numpy as np
 from fastapi import (
@@ -1510,7 +1512,7 @@ async def test_feed():
 # ─── AI Assistant routes ───────────────────────────────────────────────────────
 
 
-_GEMINI_MODEL = "gemini-2.5-flash"
+_GEMINI_MODEL = "gemini-2.0-flash"
 
 
 def _gemini_url(endpoint: str) -> str:
