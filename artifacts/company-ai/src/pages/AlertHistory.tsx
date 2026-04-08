@@ -79,7 +79,7 @@ function exportCSV(alerts: AlertRecord[]) {
   const rows = alerts.map((record) => {
     const meta = TYPE_META[record.anomaly.type];
     return [
-      escapeCsvValue(new Date(record.timestamp * 1000).toLocaleTimeString()),
+      escapeCsvValue(new Date(record.timestamp * 1000).toLocaleString()),
       escapeCsvValue(record.iso),
       escapeCsvValue(meta?.label ?? record.anomaly.type),
       escapeCsvValue(meta?.severity ?? "INFO"),

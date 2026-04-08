@@ -419,6 +419,9 @@ export default memo(SimulationCanvas, (prev, next) => {
   for (let i = 0; i < prev.anomalies.length; i++) {
     const p = prev.anomalies[i], n = next.anomalies[i];
     if (p.type !== n.type || p.track_id !== n.track_id) return false;
+    const pp = p.position, np = n.position;
+    if ((pp == null) !== (np == null)) return false;
+    if (pp && np && (pp[0] !== np[0] || pp[1] !== np[1])) return false;
   }
   return true;
 });

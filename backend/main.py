@@ -65,7 +65,9 @@ from backend.detector import _download_model, is_model_ready, get_model_error
 # ─── Global State ─────────────────────────────────────────────────────────────
 
 alert_history: deque = deque(maxlen=500)
-connected_clients: list[WebSocket] = []
+connected_clients: set[WebSocket] = set()
+
+_WS_MAX_MSG_BYTES = 1 * 1024 * 1024  # 1 MB cap per WebSocket message
 
 current_config = {
     "overcrowding_threshold": OVERCROWDING_THRESHOLD,
@@ -315,8 +317,7 @@ async def _broadcast(message: str):
         except Exception:
             dead.append(ws)
     for d in dead:
-        if d in connected_clients:
-            connected_clients.remove(d)
+        connected_clients.discard(d)
 
 
 async def _cancel_active():
@@ -573,7 +574,8 @@ async def stream_processing_loop(url: str):
     def _download_http_file(u: str) -> str:
         parsed = urlsplit(u)
         suffix = os.path.splitext(parsed.path)[1] or ".mp4"
-        tmp_path = tempfile.mktemp(prefix="crowdlens_stream_", suffix=suffix)
+        fd, tmp_path = tempfile.mkstemp(prefix="crowdlens_stream_", suffix=suffix)
+        os.close(fd)
         req = Request(
             u,
             headers={
@@ -1015,7 +1017,7 @@ app.add_middleware(
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    connected_clients.append(websocket)
+    connected_clients.add(websocket)
     try:
         while True:
             msg = await websocket.receive_text()
@@ -1025,8 +1027,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
-        if websocket in connected_clients:
-            connected_clients.remove(websocket)
+        connected_clients.discard(websocket)
 
 
 @app.websocket("/ws/cam")
@@ -1594,11 +1595,13 @@ async def generate_ai_report(req: AIReportRequest):
         )
         report = response.choices[0].message.content or ""
         return {"report": report}
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to generate report. The AI service may be unavailable.",
-        )
+    except Exception as e:
+        err = str(e).lower()
+        if any(k in err for k in ("api_key", "api key", "authentication", "unauthorized", "invalid_api_key")):
+            detail = "AI service is not configured. Please add an OpenAI integration to enable this feature."
+        else:
+            detail = "Failed to generate report. The AI service may be unavailable."
+        raise HTTPException(status_code=500, detail=detail)
 
 
 @app.post("/api/ai/chat")
@@ -1637,8 +1640,13 @@ async def ai_chat(req: AIChatRequest):
                 if content:
                     yield f"data: {json.dumps({'content': content})}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
-        except Exception:
-            yield f"data: {json.dumps({'error': 'AI service error. Please try again.'})}\n\n"
+        except Exception as e:
+            err = str(e).lower()
+            if any(k in err for k in ("api_key", "api key", "authentication", "unauthorized", "invalid_api_key")):
+                msg = "AI service is not configured. Please add an OpenAI integration to enable this feature."
+            else:
+                msg = "AI service error. Please try again."
+            yield f"data: {json.dumps({'error': msg})}\n\n"
 
     return StreamingResponse(
         stream(),
@@ -1699,31 +1707,13 @@ async def ai_narrate(req: AINarrateRequest):
         )
         narration = response.choices[0].message.content or ""
         return {"narration": narration}
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to generate narration. The AI service may be unavailable.",
-        )
-
-
-# ─── WebSocket: webcam frame receiver ────────────────────────────────────────
-
-
-@app.websocket("/ws/cam")
-async def webcam_ws(websocket: WebSocket):
-    """Browser sends JPEG frames as binary; we queue them for YOLO processing."""
-    await websocket.accept()
-    print("[ws/cam] Webcam client connected")
-    try:
-        while True:
-            data = await websocket.receive_bytes()
-            if _processing_mode == "webcam":
-                try:
-                    _cam_frame_queue.put_nowait(data)
-                except asyncio.QueueFull:
-                    pass  # Drop frame if queue is full
-    except WebSocketDisconnect:
-        print("[ws/cam] Webcam client disconnected")
+    except Exception as e:
+        err = str(e).lower()
+        if any(k in err for k in ("api_key", "api key", "authentication", "unauthorized", "invalid_api_key")):
+            detail = "AI service is not configured. Please add an OpenAI integration to enable this feature."
+        else:
+            detail = "Failed to generate narration. The AI service may be unavailable."
+        raise HTTPException(status_code=500, detail=detail)
 
 
 # ─── SPA static file serving (production) ─────────────────────────────────────

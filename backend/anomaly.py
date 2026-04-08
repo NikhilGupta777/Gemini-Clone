@@ -25,10 +25,6 @@ class AnomalyDetector:
     def update(self, tracks: list, current_time: float) -> list:
         anomalies = []
 
-        person_count = sum(1 for t in tracks if t["class_id"] == 0)
-        if person_count > OVERCROWDING_THRESHOLD:
-            anomalies.append({"type": "overcrowding", "count": person_count, "position": None})
-
         person_positions = [
             (
                 (t["x1"] + t["x2"]) / 2.0,
@@ -37,6 +33,12 @@ class AnomalyDetector:
             for t in tracks
             if t["class_id"] == 0
         ]
+
+        person_count = len(person_positions)
+        if person_count > OVERCROWDING_THRESHOLD:
+            crowd_x = sum(p[0] for p in person_positions) / person_count
+            crowd_y = sum(p[1] for p in person_positions) / person_count
+            anomalies.append({"type": "overcrowding", "count": person_count, "position": [crowd_x, crowd_y]})
 
         person_motion: dict[int, dict] = {}
 
