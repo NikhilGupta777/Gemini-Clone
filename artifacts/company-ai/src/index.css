@@ -252,10 +252,38 @@
   50%       { opacity: 0.3; }
 }
 
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+@keyframes bounce-dot {
+  0%, 80%, 100% { transform: scale(0.8); opacity: 0.4; }
+  40%           { transform: scale(1.2); opacity: 1; }
+}
+
+/* Red pulse-ring: used for threat / anomaly indicators */
 @keyframes pulse-ring {
   0%   { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
   70%  { box-shadow: 0 0 0 10px rgba(239,68,68,0); }
   100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+}
+
+/* Green pulse-dot: used for connection / webcam-active indicator */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px #10b981; }
+  50%       { opacity: 0.7; box-shadow: 0 0 16px #10b981; }
+}
+
+/* Amber pulse for the webcam live dot in the toolbar */
+@keyframes pulse-amber {
+  0%   { box-shadow: 0 0 0 0 rgba(245,158,11,0.7); }
+  70%  { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
+  100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); }
 }
 
 @keyframes slide-in {

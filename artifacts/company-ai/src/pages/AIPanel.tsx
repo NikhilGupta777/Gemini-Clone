@@ -116,7 +116,7 @@ function ReportsTab() {
 
   if (loading) {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#334155", padding: 40 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#64748b", padding: 40 }}>
         <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
         Loading alert history…
       </div>
@@ -126,9 +126,9 @@ function ReportsTab() {
   if (alerts.length === 0) {
     return (
       <div style={{ ...card, textAlign: "center", padding: 48 }}>
-        <Bot size={32} color="#1e3a5f" style={{ marginBottom: 12 }} />
+        <Bot size={32} color="#334155" style={{ marginBottom: 12 }} />
         <div style={{ color: "#475569", fontSize: 14 }}>No alerts recorded yet.</div>
-        <div style={{ color: "#334155", fontSize: 12, marginTop: 6 }}>
+        <div style={{ color: "#475569", fontSize: 12, marginTop: 6 }}>
           Start a detection session to generate incident reports.
         </div>
       </div>
@@ -648,10 +648,6 @@ export default function AIPanel() {
       {tab === "reports"  && <ReportsTab />}
       {tab === "chat"     && <ChatTab />}
 
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes blink-cursor { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
-      `}</style>
     </div>
   );
 }

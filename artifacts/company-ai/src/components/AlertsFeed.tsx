@@ -71,8 +71,8 @@ export default function AlertsFeed({ anomalies }: Props) {
           }}>
             <span style={{ fontSize: 20 }}>✓</span>
           </div>
-          <div style={{ color: "#334155", fontSize: 12, fontWeight: 600 }}>No active threats</div>
-          <div style={{ color: "#1e3a5f", fontSize: 11 }}>All zones nominal</div>
+          <div style={{ color: "#64748b", fontSize: 12, fontWeight: 600 }}>No active threats</div>
+          <div style={{ color: "#334155", fontSize: 11 }}>All zones nominal</div>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -82,9 +82,14 @@ export default function AlertsFeed({ anomalies }: Props) {
               Icon: AlertCircle, label: a.type.toUpperCase(), severity: "INFO",
             };
             const { Icon } = meta;
+            const stableKey = a.track_id !== undefined
+              ? `${a.type}-${a.track_id}`
+              : a.track_ids?.length
+                ? `${a.type}-${a.track_ids.join("-")}`
+                : `${a.type}-${i}`;
             return (
               <div
-                key={i}
+                key={stableKey}
                 className="slide-in"
                 style={{
                   background: meta.bg,
@@ -150,7 +155,7 @@ export default function AlertsFeed({ anomalies }: Props) {
                     <span style={{ fontSize: 10, color: "#eab308", fontWeight: 600 }}>{a.zone_name}</span>
                   )}
                   {a.position && (
-                    <span style={{ fontSize: 10, color: "#1e3a5f", fontFamily: "monospace" }}>
+                    <span style={{ fontSize: 10, color: "#475569", fontFamily: "monospace" }}>
                       ({Math.round(a.position[0])}, {Math.round(a.position[1])})
                     </span>
                   )}

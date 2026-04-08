@@ -66,7 +66,7 @@ function Card({
       <GlowNumber value={value} color={color} />
 
       {sub && (
-        <div style={{ fontSize: 11, color: "#334155", marginTop: 8, fontWeight: 500 }}>
+        <div style={{ fontSize: 11, color: "#475569", marginTop: 8, fontWeight: 500 }}>
           {sub}
         </div>
       )}

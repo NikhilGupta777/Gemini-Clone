@@ -126,7 +126,7 @@ function SimulationCanvas({
         for (let y = 80; y < H; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
         // Waiting label
         ctx.font = "600 12px monospace";
-        ctx.fillStyle = "#334155";
+        ctx.fillStyle = "#64748b";
         const wt = "Loading detection engine…";
         ctx.fillText(wt, W / 2 - ctx.measureText(wt).width / 2, H / 2);
       } else {
@@ -402,6 +402,10 @@ export default memo(SimulationCanvas, (prev, next) => {
   for (let i = 0; i < prev.tracks.length; i++) {
     const p = prev.tracks[i], n = next.tracks[i];
     if (p.id !== n.id || p.x1 !== n.x1 || p.y1 !== n.y1 || p.running !== n.running) return false;
+  }
+  for (let i = 0; i < prev.anomalies.length; i++) {
+    const p = prev.anomalies[i], n = next.anomalies[i];
+    if (p.type !== n.type || p.track_id !== n.track_id) return false;
   }
   return true;
 });

@@ -527,7 +527,7 @@ export default function Dashboard() {
           >
             {sourceMode === "webcam" ? (
               webcamStatus?.active
-                ? <><div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981", animation: "pulse-ring 1.4s infinite" }} /> YOLO LIVE</>
+                ? <><div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981", animation: "pulse-dot 2s infinite" }} /> YOLO LIVE</>
                 : <><Loader size={14} style={{ animation: "spin 1s linear infinite" }} /> YOLO Starting…</>
             ) : <><Camera size={14} /> Live Webcam</>}
           </button>
@@ -1047,18 +1047,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <style>{`
-        @keyframes bounce-dot {
-          0%, 80%, 100% { transform: scale(0.8); opacity: 0.4; }
-          40% { transform: scale(1.2); opacity: 1; }
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse-ring {
-          0% { box-shadow: 0 0 0 0 rgba(245,158,11,0.7); }
-          70% { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
-          100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); }
-        }
-      `}</style>
     </div>
   );
 }

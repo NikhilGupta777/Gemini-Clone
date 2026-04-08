@@ -93,12 +93,12 @@ function SidebarContent({ connected, onNavClick }: { connected: boolean; onNavCl
             </div>
           </div>
         </div>
-        <div style={{ fontSize: 10, color: "#334155", letterSpacing: 2, fontWeight: 600, paddingLeft: 42 }}>
+        <div style={{ fontSize: 10, color: "#475569", letterSpacing: 2, fontWeight: 600, paddingLeft: 42 }}>
           CAMPUS AI MONITOR
         </div>
       </div>
 
-      <div style={{ fontSize: 9, color: "#334155", letterSpacing: 2, fontWeight: 700, marginBottom: 8, paddingLeft: 4 }}>
+      <div style={{ fontSize: 9, color: "#475569", letterSpacing: 2, fontWeight: 700, marginBottom: 8, paddingLeft: 4 }}>
         NAVIGATION
       </div>
 
@@ -303,16 +303,6 @@ export default function Layout({ children, connected, threatLevel }: Props) {
         </main>
       </div>
 
-      <style>{`
-        @keyframes pulse-dot {
-          0%, 100% { opacity: 1; box-shadow: 0 0 8px #10b981; }
-          50% { opacity: 0.7; box-shadow: 0 0 16px #10b981; }
-        }
-        @keyframes blink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-      `}</style>
     </div>
   );
 }
