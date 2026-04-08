@@ -1578,8 +1578,8 @@ async def generate_ai_report(req: AIReportRequest):
         client = _make_openai_client()
         alert_text = _format_alert_for_ai(req.alert)
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            max_completion_tokens=512,
+            model="gemini-2.5-flash-preview-04-17",
+            max_tokens=512,
             messages=[
                 {
                     "role": "system",
@@ -1636,8 +1636,8 @@ async def ai_chat(req: AIChatRequest):
             messages = [{"role": "system", "content": system_prompt}] + req.messages
 
             stream_resp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                max_completion_tokens=512,
+                model="gemini-2.5-flash-preview-04-17",
+                max_tokens=512,
                 messages=messages,
                 stream=True,
             )
@@ -1693,8 +1693,8 @@ async def ai_narrate(req: AINarrateRequest):
         )
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            max_completion_tokens=200,
+            model="gemini-2.5-flash-preview-04-17",
+            max_tokens=200,
             messages=[
                 {
                     "role": "system",
