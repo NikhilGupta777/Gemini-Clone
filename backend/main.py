@@ -1510,14 +1510,53 @@ async def test_feed():
 # ─── AI Assistant routes ───────────────────────────────────────────────────────
 
 
-def _make_openai_client():
-    import openai as _openai
+_GEMINI_MODEL = "gemini-2.5-flash"
 
-    base_url = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
-    api_key = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY", "dummy")
-    if base_url:
-        return _openai.OpenAI(base_url=base_url, api_key=api_key)
-    return _openai.OpenAI(api_key=api_key)
+
+def _gemini_url(endpoint: str) -> str:
+    base = os.environ.get("AI_INTEGRATIONS_GEMINI_BASE_URL", "").rstrip("/")
+    return f"{base}/models/{_GEMINI_MODEL}:{endpoint}"
+
+
+def _gemini_headers() -> dict:
+    return {
+        "Content-Type": "application/json",
+        "x-goog-api-key": os.environ.get("AI_INTEGRATIONS_GEMINI_API_KEY", "dummy"),
+    }
+
+
+def _gemini_call(system: str, user: str, max_tokens: int = 512) -> str:
+    """Blocking non-streaming Gemini call. Returns the response text."""
+    import urllib.request as _req
+
+    body = json.dumps({
+        "system_instruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": user}]}],
+        "generationConfig": {"maxOutputTokens": max_tokens},
+    }).encode()
+    req = _req.Request(_gemini_url("generateContent"), data=body, headers=_gemini_headers())
+    with _req.urlopen(req, timeout=30) as resp:
+        data = json.loads(resp.read())
+    return data["candidates"][0]["content"]["parts"][0]["text"]
+
+
+def _gemini_chat(system: str, messages: list[dict], max_tokens: int = 512) -> str:
+    """Blocking non-streaming Gemini multi-turn chat. Returns the response text."""
+    import urllib.request as _req
+
+    contents = []
+    for m in messages:
+        role = "model" if m.get("role") == "assistant" else m.get("role", "user")
+        contents.append({"role": role, "parts": [{"text": m.get("content", "")}]})
+    body = json.dumps({
+        "system_instruction": {"parts": [{"text": system}]},
+        "contents": contents,
+        "generationConfig": {"maxOutputTokens": max_tokens},
+    }).encode()
+    req = _req.Request(_gemini_url("generateContent"), data=body, headers=_gemini_headers())
+    with _req.urlopen(req, timeout=30) as resp:
+        data = json.loads(resp.read())
+    return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
 class AIReportRequest(BaseModel):
@@ -1575,48 +1614,30 @@ def _format_alert_for_ai(alert: dict) -> str:
 async def generate_ai_report(req: AIReportRequest):
     """Generate a professional incident report for a single alert."""
     try:
-        client = _make_openai_client()
         alert_text = _format_alert_for_ai(req.alert)
-        response = client.chat.completions.create(
-            model="gemini-2.5-flash-preview-04-17",
-            max_tokens=512,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a professional security operations analyst for a campus AI monitoring system. "
-                        "Write concise, clear incident reports in plain English. "
-                        "Use a professional tone. Structure the report as: "
-                        "1) Incident Summary (2-3 sentences), "
-                        "2) Detection Details (bullet points), "
-                        "3) Recommended Action (1-2 sentences). "
-                        "Do not use markdown headers — use plain text with labels."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"Generate an incident report for the following detection:\n\n{alert_text}",
-                },
-            ],
+        system = (
+            "You are a professional security operations analyst for a campus AI monitoring system. "
+            "Write concise, clear incident reports in plain English. "
+            "Use a professional tone. Structure the report as: "
+            "1) Incident Summary (2-3 sentences), "
+            "2) Detection Details (bullet points), "
+            "3) Recommended Action (1-2 sentences). "
+            "Do not use markdown headers — use plain text with labels."
         )
-        report = response.choices[0].message.content or ""
+        user = f"Generate an incident report for the following detection:\n\n{alert_text}"
+        loop = asyncio.get_event_loop()
+        report = await loop.run_in_executor(None, lambda: _gemini_call(system, user, 2048))
         return {"report": report}
     except Exception as e:
-        err = str(e).lower()
-        if any(k in err for k in ("api_key", "api key", "authentication", "unauthorized", "invalid_api_key")):
-            detail = "AI service is not configured. Please add an OpenAI integration to enable this feature."
-        else:
-            detail = "Failed to generate report. The AI service may be unavailable."
-        raise HTTPException(status_code=500, detail=detail)
+        raise HTTPException(status_code=500, detail="Failed to generate report. The AI service may be unavailable.")
 
 
 @app.post("/api/ai/chat")
 async def ai_chat(req: AIChatRequest):
-    """Streaming SSE chat with the AI about alert history."""
+    """SSE chat with Gemini about alert history."""
 
     async def stream():
         try:
-            client = _make_openai_client()
             history_text = ""
             if req.alert_history:
                 lines = [_format_alert_for_ai(a) for a in req.alert_history[:50]]
@@ -1633,26 +1654,14 @@ async def ai_chat(req: AIChatRequest):
             else:
                 system_prompt += "\n\nNo alert history is available yet."
 
-            messages = [{"role": "system", "content": system_prompt}] + req.messages
-
-            stream_resp = client.chat.completions.create(
-                model="gemini-2.5-flash-preview-04-17",
-                max_tokens=512,
-                messages=messages,
-                stream=True,
+            loop = asyncio.get_event_loop()
+            text = await loop.run_in_executor(
+                None, lambda: _gemini_chat(system_prompt, req.messages, 2048)
             )
-            for chunk in stream_resp:
-                content = chunk.choices[0].delta.content if chunk.choices else None
-                if content:
-                    yield f"data: {json.dumps({'content': content})}\n\n"
+            yield f"data: {json.dumps({'content': text})}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
-            err = str(e).lower()
-            if any(k in err for k in ("api_key", "api key", "authentication", "unauthorized", "invalid_api_key")):
-                msg = "AI service is not configured. Please add an OpenAI integration to enable this feature."
-            else:
-                msg = "AI service error. Please try again."
-            yield f"data: {json.dumps({'error': msg})}\n\n"
+            yield f"data: {json.dumps({'error': 'AI service error. Please try again.'})}\n\n"
 
     return StreamingResponse(
         stream(),
@@ -1665,8 +1674,6 @@ async def ai_chat(req: AIChatRequest):
 async def ai_narrate(req: AINarrateRequest):
     """Generate a plain-English scene description from current detection data."""
     try:
-        client = _make_openai_client()
-
         track_lines = []
         for t in req.tracks[:20]:
             name = t.get("class_name", "person")
@@ -1692,34 +1699,19 @@ async def ai_narrate(req: AINarrateRequest):
             + ("\n".join(anomaly_lines) or "  none")
         )
 
-        response = client.chat.completions.create(
-            model="gemini-2.5-flash-preview-04-17",
-            max_tokens=200,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a security analyst narrating a live surveillance scene for an operator. "
-                        "Write 2-4 sentences describing what is currently happening in the scene. "
-                        "Be specific about people counts, anomalies, and threat level. "
-                        "Keep it concise and clear — this is a live ops summary."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"Describe this live scene:\n\n{scene_text}",
-                },
-            ],
+        system = (
+            "You are a security analyst narrating a live surveillance scene for an operator. "
+            "Write 2-4 sentences describing what is currently happening in the scene. "
+            "Be specific about people counts, anomalies, and threat level. "
+            "Keep it concise and clear — this is a live ops summary."
         )
-        narration = response.choices[0].message.content or ""
+        loop = asyncio.get_event_loop()
+        narration = await loop.run_in_executor(
+            None, lambda: _gemini_call(system, f"Describe this live scene:\n\n{scene_text}", 2048)
+        )
         return {"narration": narration}
     except Exception as e:
-        err = str(e).lower()
-        if any(k in err for k in ("api_key", "api key", "authentication", "unauthorized", "invalid_api_key")):
-            detail = "AI service is not configured. Please add an OpenAI integration to enable this feature."
-        else:
-            detail = "Failed to generate narration. The AI service may be unavailable."
-        raise HTTPException(status_code=500, detail=detail)
+        raise HTTPException(status_code=500, detail="Failed to generate narration. The AI service may be unavailable.")
 
 
 # ─── SPA static file serving (production) ─────────────────────────────────────
