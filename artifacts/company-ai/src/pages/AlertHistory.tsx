@@ -221,7 +221,10 @@ export default function AlertHistory() {
     setClearing(true);
     setClearConfirm(false);
     try {
-      await fetch("/api/alerts/clear", { method: "POST" });
+      await Promise.all([
+        fetch("/api/alerts/clear", { method: "POST" }),
+        fetch("/api/archive/clear", { method: "POST" }),
+      ]);
       setAlerts([]);
     } finally {
       setClearing(false);

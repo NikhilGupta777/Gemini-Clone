@@ -228,6 +228,31 @@ export default function Settings() {
       .catch(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    const poll = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const res = await fetch("/api/config");
+        const data = await res.json();
+        setConfig((prev) => ({
+          ...prev,
+          restricted_zone_enabled:
+            typeof data.restricted_zone_enabled === "boolean"
+              ? data.restricted_zone_enabled
+              : prev.restricted_zone_enabled,
+          restricted_zone_min_dwell:
+            typeof data.restricted_zone_min_dwell === "number"
+              ? data.restricted_zone_min_dwell
+              : prev.restricted_zone_min_dwell,
+        }));
+      } catch {
+        // Keep previous local state on transient poll failures.
+      }
+    };
+    const id = setInterval(poll, 2000);
+    return () => clearInterval(id);
+  }, []);
+
   const handleSave = async () => {
     setSaveError(null);
     try {

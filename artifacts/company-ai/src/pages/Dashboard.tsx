@@ -221,6 +221,11 @@ export default function Dashboard() {
       } catch {}
     };
     loadConfig();
+    const id = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      loadConfig();
+    }, 2000);
+    return () => clearInterval(id);
   }, []);
 
   // ── Webcam ──────────────────────────────────────────────────────────────────
