@@ -436,13 +436,6 @@ async def video_processing_loop():
     # Wall-clock anchor for playback pacing
     playback_start = time.time()
 
-    # Cache last detection result so skipped frames still show detections
-    _last_tracks: list = []
-    _last_anomalies: list = []
-    # Run inference every N frames; broadcast every frame for smooth video
-    _infer_every = max(1, round(native_fps / 8))  # target ~8 inference fps
-    _frames_since_infer = 0
-
     def _detect_sync(f):
         return detector.detect(f, conf_override=VIDEO_DETECTION_CONFIDENCE)
 
@@ -453,14 +446,12 @@ async def video_processing_loop():
                 # Loop the video back to the start
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 frame_num = 0
-                _frames_since_infer = 0
                 tracker.reset()
                 _video_anomaly_detector = AnomalyDetector()
                 playback_start = time.time()
                 continue
 
             frame_num += 1
-            _frames_since_infer += 1
             video_status["current_frame"] = frame_num
             video_status["progress"] = (
                 round((frame_num / total * 100), 1) if total > 0 else 0
@@ -469,28 +460,41 @@ async def video_processing_loop():
             # Target wall-clock time for this frame based on native video FPS
             target_time = playback_start + frame_num * frame_interval
             now = time.time()
+            drift = now - target_time
 
-            # Wait until it is time to display this frame (stay in sync)
-            wait = target_time - now
+            # If we are running behind by more than one frame interval,
+            # skip this frame (grab-only, no decode cost) to catch up.
+            if drift > frame_interval:
+                frames_to_skip = min(int(drift / frame_interval), 15)
+                for _ in range(frames_to_skip):
+                    if not cap.grab():
+                        break
+                    frame_num += 1
+                video_status["current_frame"] = frame_num
+                video_status["progress"] = (
+                    round((frame_num / total * 100), 1) if total > 0 else 0
+                )
+                await asyncio.sleep(0)
+                continue
+
+            # Wait until it is time to display this frame
+            wait = target_time - time.time()
             if wait > 0.001:
                 await asyncio.sleep(wait)
 
             frame_resized = cv2.resize(frame, (INFER_WIDTH, INFER_HEIGHT))
 
-            # Only run YOLO every N frames; reuse cached result for the rest.
-            # This keeps video smooth at native FPS while inference runs at ~8fps.
-            if _frames_since_infer >= _infer_every:
-                _frames_since_infer = 0
-                detections = await loop.run_in_executor(None, _detect_sync, frame_resized)
-                raw_tracks = tracker.update(detections)
-                now = time.time()
-                _last_tracks = _build_tracks_from_yolo(raw_tracks, INFER_WIDTH, INFER_HEIGHT)
-                _last_anomalies = _video_anomaly_detector.update(_last_tracks, now)
-                _last_tracks = _finalize_tracks(_last_tracks, _last_anomalies)
+            # Run YOLO in thread pool — keeps the asyncio event loop responsive
+            detections = await loop.run_in_executor(None, _detect_sync, frame_resized)
+            raw_tracks = tracker.update(detections)
+
+            now = time.time()
+            tracks = _build_tracks_from_yolo(raw_tracks, INFER_WIDTH, INFER_HEIGHT)
+            anomalies = _video_anomaly_detector.update(tracks, now)
+            tracks = _finalize_tracks(tracks, anomalies)
 
             payload = build_frame_payload(
-                _last_tracks, _last_anomalies, time.time(), "video",
-                frame_for_archive=frame_resized if _frames_since_infer == 0 else None
+                tracks, anomalies, now, "video", frame_for_archive=frame_resized
             )
             payload["frame_jpeg"] = _encode_preview(frame_resized)
             if connected_clients:
