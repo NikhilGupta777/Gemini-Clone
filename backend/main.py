@@ -68,6 +68,7 @@ alert_history: deque = deque(maxlen=500)
 connected_clients: set[WebSocket] = set()
 
 _WS_MAX_MSG_BYTES = 1 * 1024 * 1024  # 1 MB cap per WebSocket message
+_ALERT_COOLDOWN_SECS = 5.0
 
 current_config = {
     "overcrowding_threshold": OVERCROWDING_THRESHOLD,
@@ -103,7 +104,6 @@ _COOLDOWN_MAX_AGE = 300.0  # seconds — entries older than this are evicted
 
 # Thread pool for async DB writes — avoids spawning a new thread per alert.
 _db_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="crowdlens_db")
-_ALERT_COOLDOWN_SECS = 5.0
 _alert_id_counter = 0
 _archive_dir = os.path.join(os.path.dirname(__file__), "archive")
 _archive_retention_seconds = 7 * 24 * 60 * 60
