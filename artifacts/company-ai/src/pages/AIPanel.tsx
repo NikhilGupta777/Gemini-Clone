@@ -137,7 +137,7 @@ function ReportsTab() {
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: meta.color }}>{meta.label}</div>
                   <div style={{ fontSize: 11, color: "#334155", marginTop: 2, fontFamily: "monospace" }}>
-                    {new Date(alert.timestamp * 1000).toLocaleString("en-IN")}
+                    {new Date(alert.timestamp * 1000).toLocaleString(undefined)}
                     {alert.anomaly.track_id !== undefined && ` · Track #${alert.anomaly.track_id}`}
                     {alert.anomaly.count !== undefined && ` · ${alert.anomaly.count} people`}
                     {alert.source && ` · ${alert.source.toUpperCase()}`}
@@ -502,7 +502,7 @@ function NarratorTab() {
             <span style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8" }}>Scene Narration</span>
             {lastUpdated && (
               <span style={{ fontSize: 10, color: "#334155", fontFamily: "monospace" }}>
-                Updated {lastUpdated.toLocaleTimeString("en-IN")}
+                Updated {lastUpdated.toLocaleTimeString(undefined)}
               </span>
             )}
           </div>

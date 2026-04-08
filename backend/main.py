@@ -1018,18 +1018,10 @@ async def websocket_endpoint(websocket: WebSocket):
     connected_clients.append(websocket)
     try:
         while True:
-            data = await websocket.receive_bytes()
-            if _processing_mode == "webcam" and data:
-                # Received webcam frame from frontend
-                try:
-                    _cam_frame_queue.put_nowait(data)
-                except asyncio.QueueFull:
-                    # Drop old frame if queue is full
-                    try:
-                        _cam_frame_queue.get_nowait()
-                        _cam_frame_queue.put_nowait(data)
-                    except:
-                        pass
+            msg = await websocket.receive_text()
+            if len(msg) > _WS_MAX_MSG_BYTES:
+                await websocket.close(code=1009)  # 1009 = message too large
+                break
     except WebSocketDisconnect:
         pass
     finally:
@@ -1712,26 +1704,6 @@ async def ai_narrate(req: AINarrateRequest):
             status_code=500,
             detail="Failed to generate narration. The AI service may be unavailable.",
         )
-
-
-# ─── WebSocket: dashboard data broadcast ──────────────────────────────────────
-
-_WS_MAX_MSG_BYTES = 4096  # Clients send nothing meaningful; cap to block abuse.
-
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    connected_clients.append(websocket)
-    try:
-        while True:
-            msg = await websocket.receive_text()
-            if len(msg) > _WS_MAX_MSG_BYTES:
-                await websocket.close(code=1009)  # 1009 = message too large
-                break
-    except WebSocketDisconnect:
-        if websocket in connected_clients:
-            connected_clients.remove(websocket)
 
 
 # ─── WebSocket: webcam frame receiver ────────────────────────────────────────
