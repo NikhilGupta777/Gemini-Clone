@@ -117,6 +117,14 @@ export function useLocalCamRelay() {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (buf.byteLength < 100) return; // sanity: skip empty/corrupt frames
+    if (ws.bufferedAmount > WS_BACKLOG) return; // backpressure guard
+
+    // Rate-limit to MIN_FRAME_MS (≈5 fps) — MJPEG cameras may produce 15-20 fps
+    // but CPU YOLO can only process ~5 fps; flooding it just adds latency.
+    const now = Date.now();
+    if (now - lastSentRef.current < MIN_FRAME_MS) return;
+    lastSentRef.current = now;
+
     ws.send(buf);
     markFrame();
   };

@@ -672,7 +672,7 @@ export default function Dashboard() {
                     : "Drop video here or click to browse"
                 }
               </div>
-              <div style={{ fontSize: 11, color: "#334155", marginTop: 4 }}>MP4, AVI, MOV, MKV · max 500 MB</div>
+              <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>MP4, AVI, MOV, MKV · max 500 MB</div>
             </div>
           )}
 
@@ -858,7 +858,7 @@ export default function Dashboard() {
             )}
             {localRelay.state === "active" && (
               <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11 }}>
-                <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981", animation: "pulse-ring 1.4s infinite" }} />
+                <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981", animation: "pulse-dot 2s infinite" }} />
                 <span style={{ color: "#10b981" }}>Relaying frames — YOLO11m processing live</span>
               </div>
             )}
