@@ -45,6 +45,10 @@ interface RestrictedZone {
   y2: number;
 }
 
+interface SmoothedBox {
+  x1: number; y1: number; x2: number; y2: number;
+}
+
 interface Props {
   tracks: Track[];
   anomalies: Anomaly[];
@@ -53,19 +57,23 @@ interface Props {
   sourceMode?: SourceMode;
   frameJpeg?: string;
   restrictedZones?: RestrictedZone[];
+  smoothFactor?: number;
 }
 
 function SimulationCanvas({
-  tracks, anomalies, cameraMode, videoRef, sourceMode = "idle", frameJpeg, restrictedZones = [],
+  tracks, anomalies, cameraMode, videoRef, sourceMode = "idle", frameJpeg, restrictedZones = [], smoothFactor = 0.3,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
 
-  // Keep a decoded Image element for the latest JPEG frame from backend
   const backendImgRef = useRef<HTMLImageElement | null>(null);
   const lastJpegRef = useRef<string | undefined>(undefined);
 
-  // When frameJpeg changes, update the Image element
+  const smoothedMapRef = useRef<Map<number, SmoothedBox>>(new Map());
+  const smoothRef = useRef(smoothFactor);
+
+  useEffect(() => { smoothRef.current = smoothFactor; }, [smoothFactor]);
+
   useEffect(() => {
     if (!frameJpeg || frameJpeg === lastJpegRef.current) return;
     lastJpegRef.current = frameJpeg;
@@ -75,7 +83,6 @@ function SimulationCanvas({
     backendImgRef.current.src = `data:image/jpeg;base64,${frameJpeg}`;
   }, [frameJpeg]);
 
-  // Keep latest data in a ref so the RAF loop can read it without stale closures
   const dataRef = useRef({ tracks, anomalies, cameraMode, sourceMode, restrictedZones });
   useEffect(() => {
     dataRef.current = { tracks, anomalies, cameraMode, sourceMode, restrictedZones };
@@ -88,14 +95,15 @@ function SimulationCanvas({
     if (!ctx) return;
 
     let lastIdleFrameTs = 0;
-    const IDLE_FRAME_INTERVAL = 100; // ~10 fps when idle
+    const IDLE_FRAME_INTERVAL = 100;
 
     function draw() {
       if (!ctx || !canvas) return;
       const { tracks, anomalies, cameraMode, sourceMode, restrictedZones } = dataRef.current;
+      const alpha = smoothRef.current;
+      const smap = smoothedMapRef.current;
       const t = Date.now();
 
-      // Throttle to ~10 fps when idle — the standby animation only needs sin()
       if (sourceMode === "idle") {
         if (t - lastIdleFrameTs < IDLE_FRAME_INTERVAL) {
           rafRef.current = requestAnimationFrame(draw);
@@ -108,26 +116,20 @@ function SimulationCanvas({
 
       ctx.clearRect(0, 0, W, H);
 
-      // ── Background ─────────────────────────────────────────────────────────
-
       const vid = videoRef.current;
       const hasLiveWebcam = cameraMode === "webcam" && vid && vid.readyState >= 2;
       const hasBackendFrame = backendImgRef.current?.complete && backendImgRef.current.naturalWidth > 0;
       const isActiveMode = sourceMode === "video" || sourceMode === "stream" || sourceMode === "webcam";
 
       if (hasLiveWebcam) {
-        // Webcam: draw the local video element directly (zero latency)
         ctx.drawImage(vid, 0, 0, W, H);
-        // Slight dark tint so overlays are readable
         ctx.fillStyle = "rgba(0,0,0,0.15)";
         ctx.fillRect(0, 0, W, H);
       } else if (isActiveMode && hasBackendFrame && backendImgRef.current) {
-        // Video / Stream / Webcam (YOLO path): draw server-sent JPEG frame
         ctx.drawImage(backendImgRef.current, 0, 0, W, H);
         ctx.fillStyle = "rgba(0,0,0,0.18)";
         ctx.fillRect(0, 0, W, H);
       } else if (isActiveMode) {
-        // Active but no frame yet — dark grid while waiting
         const bg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 700);
         bg.addColorStop(0, "#0a0f1f");
         bg.addColorStop(1, "#05080f");
@@ -137,13 +139,11 @@ function SimulationCanvas({
         ctx.lineWidth = 1;
         for (let x = 80; x < W; x += 80) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
         for (let y = 80; y < H; y += 80) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-        // Waiting label
         ctx.font = "600 12px monospace";
         ctx.fillStyle = "#64748b";
         const wt = "Loading detection engine…";
         ctx.fillText(wt, W / 2 - ctx.measureText(wt).width / 2, H / 2);
       } else {
-        // Idle — standby background
         const bg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 700);
         bg.addColorStop(0, "#080e1c");
         bg.addColorStop(1, "#040810");
@@ -197,16 +197,37 @@ function SimulationCanvas({
         }
       }
 
-      // ── Detection tracks ────────────────────────────────────────────────────
+      // ── Smooth lerp: glide bounding boxes toward target positions ───────────
+      // Remove entries for tracks no longer in frame
+      const activeIds = new Set(tracks.map(tk => tk.id));
+      for (const id of smap.keys()) {
+        if (!activeIds.has(id)) smap.delete(id);
+      }
 
-      // Sort: anomalies/running first so their labels win collision checks
-      const sorted = [...tracks].sort((a, b) => {
+      // Lerp each track toward its new YOLO position
+      const smoothedTracks = tracks.map(tk => {
+        const prev = smap.get(tk.id);
+        if (!prev || alpha >= 0.99) {
+          const box = { x1: tk.x1, y1: tk.y1, x2: tk.x2, y2: tk.y2 };
+          smap.set(tk.id, box);
+          return tk;
+        }
+        const sx1 = prev.x1 + (tk.x1 - prev.x1) * alpha;
+        const sy1 = prev.y1 + (tk.y1 - prev.y1) * alpha;
+        const sx2 = prev.x2 + (tk.x2 - prev.x2) * alpha;
+        const sy2 = prev.y2 + (tk.y2 - prev.y2) * alpha;
+        const box = { x1: sx1, y1: sy1, x2: sx2, y2: sy2 };
+        smap.set(tk.id, box);
+        return { ...tk, x1: sx1, y1: sy1, x2: sx2, y2: sy2 };
+      });
+
+      // ── Detection tracks ────────────────────────────────────────────────────
+      const sorted = [...smoothedTracks].sort((a, b) => {
         const aScore = (anomalyIds.has(a.id) || a.running) ? 1 : 0;
         const bScore = (anomalyIds.has(b.id) || b.running) ? 1 : 0;
         return bScore - aScore;
       });
 
-      // Track placed label regions to avoid overlapping text
       const placedLabels: { lx: number; ly: number; lw: number; lh: number }[] = [];
 
       const labelOverlaps = (lx: number, ly: number, lw: number, lh: number) => {
@@ -239,7 +260,6 @@ function SimulationCanvas({
         drawCornerMarker(ctx, x1, y1, x2, y2, color);
         ctx.shadowBlur = 0;
 
-        // Skip label for very small detections (tiny/far objects)
         const tooSmall = boxW < 38 && boxH < 38;
         if (!tooSmall) {
           const confStr = confidence !== undefined ? ` ${(confidence * 100).toFixed(0)}%` : "";
@@ -272,7 +292,6 @@ function SimulationCanvas({
       }
 
       // ── Anomaly zone overlays ───────────────────────────────────────────────
-
       for (const anomaly of anomalies) {
         if (!anomaly.position) continue;
         const [ax, ay] = anomaly.position;
@@ -341,7 +360,6 @@ function SimulationCanvas({
       }
 
       // ── HUD ────────────────────────────────────────────────────────────────
-
       const modeLabel = (() => {
         if (sourceMode === "video")  return "YOLO · VIDEO";
         if (sourceMode === "webcam") return "YOLO · WEBCAM";
@@ -395,6 +413,7 @@ export default memo(SimulationCanvas, (prev, next) => {
   if (prev.sourceMode !== next.sourceMode) return false;
   if (prev.cameraMode !== next.cameraMode) return false;
   if (prev.videoRef !== next.videoRef) return false;
+  if (prev.smoothFactor !== next.smoothFactor) return false;
   if ((prev.restrictedZones?.length ?? 0) !== (next.restrictedZones?.length ?? 0)) return false;
   if ((prev.restrictedZones?.length ?? 0) > 0) {
     for (let i = 0; i < (prev.restrictedZones?.length ?? 0); i++) {

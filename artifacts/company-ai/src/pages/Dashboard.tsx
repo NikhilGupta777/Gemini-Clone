@@ -96,6 +96,21 @@ export default function Dashboard() {
 
   const [localCamUrl, setLocalCamUrl] = useState<string>("");
 
+  const [boxSmooth, setBoxSmooth] = useState<number>(() => {
+    const saved = localStorage.getItem("crowdlens_box_smooth");
+    return saved !== null ? parseFloat(saved) : 0.3;
+  });
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "crowdlens_box_smooth" && e.newValue !== null) {
+        setBoxSmooth(parseFloat(e.newValue));
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   const localRelay = useLocalCamRelay();
 
   const videoElRef = useRef<HTMLVideoElement | null>(null);
