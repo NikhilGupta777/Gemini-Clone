@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, BarChart2, Camera, Download, Filter, RefreshCw, ShieldAlert, UserRoundX, Users, Zap } from "lucide-react";
 import { useIsMobile } from "../hooks/use-mobile";
+import { AlertRecord } from "../types";
 import {
   Bar,
   BarChart,
@@ -10,30 +11,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-
-interface AlertRecord {
-  id: number;
-  anomaly: {
-    type: string;
-    track_id?: number;
-    count?: number;
-    duration?: number;
-    avg_speed?: number;
-    avg_pair_speed?: number;
-    distance?: number;
-    track_ids?: number[];
-    aspect_ratio?: number;
-    owner_absent?: number;
-    zone_id?: string;
-    zone_name?: string;
-    note?: string;
-    position: [number, number] | null;
-  };
-  timestamp: number;
-  iso: string;
-  source?: string;
-  snapshot_url?: string | null;
-}
 
 const TYPE_META: Record<string, { color: string; Icon: typeof Zap; label: string; severity: string }> = {
   running:           { color: "#a855f7", Icon: Zap,         label: "Running",            severity: "CRITICAL" },
@@ -102,7 +79,7 @@ function exportCSV(alerts: AlertRecord[]) {
   const rows = alerts.map((record) => {
     const meta = TYPE_META[record.anomaly.type];
     return [
-      escapeCsvValue(new Date(record.timestamp * 1000).toLocaleTimeString("en-IN")),
+      escapeCsvValue(new Date(record.timestamp * 1000).toLocaleTimeString()),
       escapeCsvValue(record.iso),
       escapeCsvValue(meta?.label ?? record.anomaly.type),
       escapeCsvValue(meta?.severity ?? "INFO"),
@@ -141,7 +118,7 @@ function buildChartData(alerts: AlertRecord[]): ChartBucket[] {
 
   for (let i = 0; i < 10; i++) {
     const t = Math.floor((now - (9 - i) * 60) / 60) * 60;
-    const label = new Date(t * 1000).toLocaleTimeString("en-IN", {
+    const label = new Date(t * 1000).toLocaleTimeString(undefined, {
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -160,7 +137,7 @@ function buildChartData(alerts: AlertRecord[]): ChartBucket[] {
   for (const record of alerts) {
     if (now - record.timestamp > rangeSeconds) continue;
     const t = Math.floor(record.timestamp / 60) * 60;
-    const label = new Date(t * 1000).toLocaleTimeString("en-IN", {
+    const label = new Date(t * 1000).toLocaleTimeString(undefined, {
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -220,7 +197,9 @@ export default function AlertHistory() {
 
   useEffect(() => {
     fetchHistory();
-    const interval = setInterval(() => fetchHistory(), 3000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchHistory();
+    }, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -471,12 +450,11 @@ export default function AlertHistory() {
                 return (
                   <tr
                     key={record.id}
-                    style={{ borderTop: "1px solid rgba(255,255,255,0.04)", transition: "background 0.15s" }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.02)"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                    className="alert-row"
+                    style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}
                   >
                     <td style={{ padding: "11px 16px", color: "#475569", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12 }}>
-                      {new Date(record.timestamp * 1000).toLocaleTimeString("en-IN")}
+                      {new Date(record.timestamp * 1000).toLocaleTimeString()}
                     </td>
                     <td style={{ padding: "11px 16px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

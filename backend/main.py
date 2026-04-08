@@ -123,8 +123,6 @@ video_status = {
     "progress": 0.0,
     "total_frames": 0,
     "current_frame": 0,
-    "model_ready": False,
-    "model_error": None,
     "error": None,
 }
 
@@ -1039,6 +1037,27 @@ async def websocket_endpoint(websocket: WebSocket):
             connected_clients.remove(websocket)
 
 
+@app.websocket("/ws/cam")
+async def websocket_cam_endpoint(websocket: WebSocket):
+    """Dedicated WebSocket for inbound camera frames only.
+    Not added to connected_clients — never receives broadcast data."""
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            if _processing_mode == "webcam" and data:
+                try:
+                    _cam_frame_queue.put_nowait(data)
+                except asyncio.QueueFull:
+                    try:
+                        _cam_frame_queue.get_nowait()
+                        _cam_frame_queue.put_nowait(data)
+                    except:
+                        pass
+    except WebSocketDisconnect:
+        pass
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "uptime": round(time.time() - _start_time)}
@@ -1532,7 +1551,7 @@ def _format_alert_for_ai(alert: dict) -> str:
     ]
     if a.get("track_id") is not None:
         parts.append(f"Track ID: #{a['track_id']}")
-    if a.get("track_ids"):
+    if a.get("track_ids") and len(a["track_ids"]) >= 2:
         parts.append(f"Track Pair: #{a['track_ids'][0]} & #{a['track_ids'][1]}")
     if a.get("count") is not None:
         parts.append(f"People count: {a['count']}")

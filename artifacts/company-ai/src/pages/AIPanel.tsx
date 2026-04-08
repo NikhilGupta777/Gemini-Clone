@@ -7,29 +7,9 @@ import {
 import { useDetection } from "../context/DetectionContext";
 import { useIsMobile } from "../hooks/use-mobile";
 
-// ── types ───────────────────────────────────────────────────────────────────
+import { AlertRecord } from "../types";
 
-interface AlertRecord {
-  id: number;
-  anomaly: {
-    type: string;
-    track_id?: number;
-    count?: number;
-    duration?: number;
-    avg_speed?: number;
-    avg_pair_speed?: number;
-    distance?: number;
-    track_ids?: number[];
-    zone_name?: string;
-    zone_id?: string;
-    position: [number, number] | null;
-    note?: string;
-  };
-  timestamp: number;
-  iso: string;
-  source?: string;
-  snapshot_url?: string | null;
-}
+// ── types ───────────────────────────────────────────────────────────────────
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -246,11 +226,13 @@ function ChatTab() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const fetchHistory = () =>
+    const fetchHistory = () => {
+      if (document.visibilityState !== "visible") return;
       fetch("/api/alerts/history?limit=50")
         .then((r) => r.json())
         .then((d) => setAlertHistory(d.alerts || []))
         .catch(() => {});
+    };
     fetchHistory();
     const id = setInterval(fetchHistory, 15000);
     return () => clearInterval(id);
@@ -273,11 +255,13 @@ function ChatTab() {
     setMessages((p) => [...p, assistantMsg]);
 
     try {
+      const allMessages = [...messages, userMsg];
+      const recentMessages = allMessages.slice(-30);
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [...messages, userMsg].map((m) => ({ role: m.role, content: m.content })),
+          messages: recentMessages.map((m) => ({ role: m.role, content: m.content })),
           alert_history: alertHistory,
         }),
       });

@@ -87,10 +87,23 @@ function SimulationCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    let lastIdleFrameTs = 0;
+    const IDLE_FRAME_INTERVAL = 100; // ~10 fps when idle
+
     function draw() {
       if (!ctx || !canvas) return;
       const { tracks, anomalies, cameraMode, sourceMode, restrictedZones } = dataRef.current;
       const t = Date.now();
+
+      // Throttle to ~10 fps when idle — the standby animation only needs sin()
+      if (sourceMode === "idle") {
+        if (t - lastIdleFrameTs < IDLE_FRAME_INTERVAL) {
+          rafRef.current = requestAnimationFrame(draw);
+          return;
+        }
+        lastIdleFrameTs = t;
+      }
+
       const anomalyIds = getAnomalyIds(anomalies);
 
       ctx.clearRect(0, 0, W, H);
@@ -348,7 +361,7 @@ function SimulationCanvas({
       ctx.fill();
       ctx.fillStyle = modeColor;
       ctx.font = "11px monospace";
-      ctx.fillText(`${new Date().toLocaleTimeString("en-IN")}  ·  ${modeLabel}`, 20, H - 17);
+      ctx.fillText(`${new Date().toLocaleTimeString()}  ·  ${modeLabel}`, 20, H - 17);
 
       const isReal = sourceMode !== "idle";
       const badgeText = isReal ? "⚡ LIVE DETECT" : "◉ STANDBY";
@@ -401,7 +414,7 @@ export default memo(SimulationCanvas, (prev, next) => {
   if (prev.anomalies.length !== next.anomalies.length) return false;
   for (let i = 0; i < prev.tracks.length; i++) {
     const p = prev.tracks[i], n = next.tracks[i];
-    if (p.id !== n.id || p.x1 !== n.x1 || p.y1 !== n.y1 || p.running !== n.running) return false;
+    if (p.id !== n.id || p.x1 !== n.x1 || p.y1 !== n.y1 || p.x2 !== n.x2 || p.y2 !== n.y2 || p.running !== n.running) return false;
   }
   for (let i = 0; i < prev.anomalies.length; i++) {
     const p = prev.anomalies[i], n = next.anomalies[i];

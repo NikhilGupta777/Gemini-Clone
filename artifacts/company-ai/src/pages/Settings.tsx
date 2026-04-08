@@ -32,7 +32,7 @@ interface Config {
 
 const DEFAULT_CONFIG: Config = {
   overcrowding_threshold: 4,
-  running_speed_threshold: 20,
+  running_speed_threshold: 18,
   unattended_object_time: 5,
   stationary_threshold: 150,
   unattended_owner_proximity_px: 180,

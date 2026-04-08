@@ -8,9 +8,9 @@ CONFIDENCE_THRESHOLD = 0.25
 
 # Inference resolution for video / webcam modes.
 # YOLO was trained at 640px; running at native 640x360 avoids the internal
-# downsample from 1280x720, roughly halving inference time.
-INFER_WIDTH = 1280
-INFER_HEIGHT = 720
+# downsample from 1280x720, cutting inference time by ~4×.
+INFER_WIDTH = 640
+INFER_HEIGHT = 360
 
 # Stream mode tuning:
 STREAM_FRAME_WIDTH = 1280
@@ -30,7 +30,6 @@ TRACKER_MIN_HITS = 1
 # Higher max_age keeps IDs alive through brief occlusions (crowded scenes).
 # Lower IOU threshold accepts larger positional shifts between frames.
 MAX_AGE = 30
-MIN_HITS = 1
 IOU_THRESHOLD = 0.25
 
 # Anomaly detection settings

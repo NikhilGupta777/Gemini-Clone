@@ -116,6 +116,7 @@ export default function Dashboard() {
   // Poll video status — no dependencies so interval is stable
   useEffect(() => {
     const poll = async () => {
+      if (document.visibilityState !== "visible") return;
       try {
         const res = await fetch("/api/video/status");
         const data = await res.json();
@@ -135,6 +136,7 @@ export default function Dashboard() {
   // Poll stream status — stable interval; auto-reset mode when stream errors out
   useEffect(() => {
     const poll = async () => {
+      if (document.visibilityState !== "visible") return;
       try {
         const res = await fetch("/api/stream/status");
         const data = await res.json();
@@ -153,6 +155,7 @@ export default function Dashboard() {
   // Poll webcam status — stable interval, no sourceMode dependency
   useEffect(() => {
     const poll = async () => {
+      if (document.visibilityState !== "visible") return;
       try {
         const res = await fetch("/api/webcam/status");
         const data = await res.json();

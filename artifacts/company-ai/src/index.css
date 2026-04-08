@@ -315,6 +315,14 @@
   animation: fade-in 0.3s ease both;
 }
 
+/* Alert table row hover */
+.alert-row {
+  transition: background 0.15s;
+}
+.alert-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
 /* ─── Elevation utilities ─── */
 @layer utilities {
   input[type="search"]::-webkit-search-cancel-button {
