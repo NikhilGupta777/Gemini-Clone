@@ -788,23 +788,20 @@ export default function Dashboard() {
           {/* ── Local IP Camera (MJPEG Relay) ── */}
           <div>
             <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-              <Radio size={13} /> Local Network Camera — Browser MJPEG Relay
+              <Radio size={13} /> Phone Camera — Browser MJPEG Relay
             </div>
             <div style={{
-              fontSize: 11, color: "#78350f", background: "rgba(245,158,11,0.07)",
-              border: "1px solid rgba(245,158,11,0.2)", borderRadius: 7, padding: "8px 10px", marginBottom: 10, lineHeight: 1.6,
+              fontSize: 11, color: "#64748b", background: "rgba(56,189,248,0.05)",
+              border: "1px solid rgba(56,189,248,0.12)", borderRadius: 7, padding: "8px 10px", marginBottom: 10, lineHeight: 1.6,
             }}>
-              <strong style={{ color: "#f59e0b" }}>How this works:</strong> Your browser fetches frames directly
-              from the camera and relays raw JPEG bytes to the AI engine via WebSocket — no canvas, no CORS restriction.
-              If DroidCam stops streaming, the relay <strong style={{ color: "#f59e0b" }}>auto-reconnects</strong> every 2 s.
-              Make sure HTTPS is <strong style={{ color: "#ef4444" }}>OFF</strong> in DroidCam → Settings → IP Webcam.
+              <strong style={{ color: "#38bdf8" }}>For wired campus / IP cameras:</strong> use the{" "}
+              <strong style={{ color: "#f59e0b" }}>Live Stream</strong> button above — paste your RTSP/HTTP URL there for best performance.
+              This section is for <strong>phone cameras</strong> (DroidCam, IP Webcam) that expose an HTTP MJPEG endpoint.
             </div>
-            <div style={{ fontSize: 10, color: "#334155", marginBottom: 10, lineHeight: 1.9 }}>
-              <strong style={{ color: "#64748b" }}>DroidCam URLs (replace 192.168.1.8 with your phone's IP):</strong><br />
+            <div style={{ fontSize: 10, color: "#64748b", marginBottom: 10, lineHeight: 1.9 }}>
+              <strong style={{ color: "#94a3b8" }}>DroidCam (phone) URLs — replace IP with your phone's IP:</strong><br />
               MJPEG stream: <code style={{ color: "#38bdf8" }}>http://192.168.1.8:4747/video</code><br />
-              Snapshot (more stable): <code style={{ color: "#38bdf8" }}>http://192.168.1.8:4747/shot.jpg</code><br />
-              <strong style={{ color: "#64748b" }}>Campus IP cameras:</strong><br />
-              Hikvision: <code style={{ color: "#38bdf8" }}>http://IP/video.cgi?user=admin&pwd=pass</code> · Dahua: <code style={{ color: "#38bdf8" }}>http://IP/cgi-bin/mjpg/video.cgi</code>
+              Snapshot (more stable): <code style={{ color: "#38bdf8" }}>http://192.168.1.8:4747/shot.jpg</code>
             </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
               <div style={{ position: "relative", flex: 1 }}>
@@ -871,7 +868,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Stream Panel (Internet / Cloud-reachable sources) ── */}
+      {/* ── Stream / IP Camera Panel ── */}
       {activePanel === "stream" && (
         <div style={{
           background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.2)",
@@ -879,7 +876,7 @@ export default function Dashboard() {
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <div style={{ fontSize: 9, color: "#f59e0b", letterSpacing: 2, fontWeight: 700 }}>
-              INTERNET STREAM · RTSP / HTTP — YOLO11m REAL-TIME
+              IP CAMERA · RTSP / HTTP / MJPEG — YOLO11m REAL-TIME
             </div>
             <button onClick={() => setActivePanel("none")} style={{ background: "none", border: "none", cursor: "pointer", color: "#475569" }}>
               <X size={16} />
@@ -897,19 +894,17 @@ export default function Dashboard() {
             )}
           </div>
 
+          {/* Camera URL examples */}
           <div style={{
-            fontSize: 11, color: "#78350f", background: "rgba(245,158,11,0.07)",
-            border: "1px solid rgba(245,158,11,0.2)", borderRadius: 7, padding: "8px 10px", marginBottom: 12, lineHeight: 1.6,
+            fontSize: 11, color: "#64748b", background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.07)", borderRadius: 8, padding: "10px 12px", marginBottom: 12, lineHeight: 2,
           }}>
-            ⚠ <strong style={{ color: "#f59e0b" }}>The cloud backend connects to this URL</strong> — the stream must be
-            publicly reachable (open port, public IP, or hosted URL). For cameras on your{" "}
-            <strong>local network</strong>, use <strong>Live Webcam → Local IP Camera</strong> instead.
-          </div>
-
-          <div style={{ fontSize: 10, color: "#334155", marginBottom: 10, lineHeight: 1.9 }}>
-            <code style={{ color: "#10b981" }}>https://example.com/live.mp4</code> — HTTP MP4/MJPEG (loops) ✓<br />
-            <code style={{ color: "#10b981" }}>rtsp://user:pass@public-ip:554/stream</code> — RTSP via internet ✓<br />
-            <code style={{ color: "#475569" }}>rtsp://192.168.x.x/stream</code> — local IP (not cloud-reachable) ✗
+            <div style={{ color: "#94a3b8", fontWeight: 700, fontSize: 10, letterSpacing: 1, marginBottom: 6 }}>WIRED IP CAMERA URLS (replace IP with your camera's IP)</div>
+            <div><code style={{ color: "#10b981" }}>rtsp://admin:password@192.168.1.100:554/stream</code> <span style={{ color: "#475569" }}>— Universal RTSP</span></div>
+            <div><code style={{ color: "#10b981" }}>rtsp://admin:password@192.168.1.100:554/Streaming/Channels/101</code> <span style={{ color: "#475569" }}>— Hikvision</span></div>
+            <div><code style={{ color: "#10b981" }}>rtsp://admin:password@192.168.1.100:554/cam/realmonitor?channel=1&subtype=0</code> <span style={{ color: "#475569" }}>— Dahua</span></div>
+            <div><code style={{ color: "#10b981" }}>rtsp://root:pass@192.168.1.100/axis-media/media.amp</code> <span style={{ color: "#475569" }}>— Axis</span></div>
+            <div><code style={{ color: "#38bdf8" }}>http://192.168.1.100/video.cgi</code> <span style={{ color: "#475569" }}>— HTTP MJPEG stream</span></div>
           </div>
 
           <button
@@ -932,7 +927,7 @@ export default function Dashboard() {
                 value={streamUrl}
                 onChange={e => setStreamUrl(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && !isStreaming && startStream()}
-                placeholder="rtsp:// or https:// stream URL"
+                placeholder="rtsp://admin:password@192.168.1.x:554/stream"
                 disabled={isStreaming}
                 style={{
                   width: "100%", padding: "9px 12px 9px 32px", borderRadius: 8, boxSizing: "border-box",
@@ -968,9 +963,9 @@ export default function Dashboard() {
             </div>
           )}
 
-          {isStreaming && (
+          {isStreaming && !streamStatus?.error && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 11 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", boxShadow: "0 0 8px #f59e0b", animation: "pulse-ring 1.4s infinite" }} />
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", boxShadow: "0 0 8px #f59e0b", animation: "pulse-amber 1.4s infinite" }} />
               <span style={{ color: "#f59e0b" }}>Stream active — YOLO11m processing</span>
             </div>
           )}
@@ -997,7 +992,7 @@ export default function Dashboard() {
                 flexDirection: "column", gap: 14, zIndex: 10, backdropFilter: "blur(4px)",
               }}>
                 <Cpu size={36} color="#1e3a5f" />
-                <div style={{ color: "#334155", fontSize: 14, fontWeight: 600 }}>Connecting to detection engine…</div>
+                <div style={{ color: "#64748b", fontSize: 14, fontWeight: 600 }}>Connecting to detection engine…</div>
                 <div style={{ display: "flex", gap: 6 }}>
                   {[0, 1, 2].map(i => (
                     <div key={i} style={{
