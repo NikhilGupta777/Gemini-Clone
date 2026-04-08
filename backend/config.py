@@ -20,8 +20,9 @@ STREAM_TARGET_FPS = 15
 STREAM_DETECTION_CONFIDENCE = 0.25
 
 # Detection confidence overrides per mode.
-VIDEO_DETECTION_CONFIDENCE = 0.28
-WEBCAM_DETECTION_CONFIDENCE = 0.28
+# Lower thresholds catch more crowd members (small/distant/partially occluded).
+VIDEO_DETECTION_CONFIDENCE = 0.18
+WEBCAM_DETECTION_CONFIDENCE = 0.20
 
 # Tracker confirmation policy.
 # 1 = show tracks immediately (better for fast occlusion recovery).

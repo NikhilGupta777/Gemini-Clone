@@ -17,9 +17,9 @@ import { useEffect, useRef, useCallback, RefObject } from "react";
 
 const FRAME_W  = 640;
 const FRAME_H  = 360;
-const JPEG_QUALITY = 0.75;
+const JPEG_QUALITY = 0.60;  // lower = smaller upload per frame = less lag on slow sources (DroidCam)
 const INTERVAL_MS  = 200;   // 5 fps — matches CPU YOLO throughput
-const WS_BACKLOG   = 64_000; // bytes — skip frame if WS buffer exceeds this
+const WS_BACKLOG   = 32_000; // bytes — tighter backpressure: drop frames sooner to stay real-time
 const RECONNECT_DELAY_MS = 1500;
 
 function getWsCamUrl() {
