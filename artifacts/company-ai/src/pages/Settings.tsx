@@ -564,8 +564,22 @@ export default function Settings() {
           })}
         </div>
 
-        <div style={{ marginTop: 14, fontSize: 11, color: "#334155" }}>
-          Changes apply instantly to the live detection canvas — no save required.
+        <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+          <PremiumSlider
+            label="Bounding Box Smoothing"
+            description="Controls how quickly detection boxes catch up to real positions. Lower = snappier, higher = smoother motion."
+            icon={Sliders}
+            color="#6366f1"
+            value={boxSmooth}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={setBoxSmooth}
+          />
+        </div>
+
+        <div style={{ marginTop: 4, fontSize: 11, color: "#334155" }}>
+          Overlay style and smoothing apply instantly to the live canvas — no save required.
           Anomaly warnings (overcrowding, fights, falls) always remain visible regardless of style.
         </div>
       </div>

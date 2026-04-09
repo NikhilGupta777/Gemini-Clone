@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
 import {
   Bot, Brain, FileText, MessageSquare, Mic2, Send, Sparkles,
   AlertCircle, Loader2, ChevronDown, ChevronUp, RefreshCw, Zap,
@@ -28,7 +28,7 @@ const TYPE_META: Record<string, { color: string; Icon: typeof Zap; label: string
   manual_snapshot:   { color: "#60a5fa", Icon: Camera,       label: "Manual Snapshot" },
 };
 
-const card: React.CSSProperties = {
+const card: CSSProperties = {
   background: "rgba(255,255,255,0.025)",
   border: "1px solid rgba(255,255,255,0.07)",
   borderRadius: 14,
