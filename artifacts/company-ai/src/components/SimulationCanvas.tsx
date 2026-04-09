@@ -4,6 +4,8 @@ import { Track, Anomaly } from "../hooks/useSimulation";
 const W = 1280;
 const H = 720;
 
+export type OverlayStyle = "corners" | "dots" | "heatmap" | "chips" | "auto";
+
 function getAnomalyIds(anomalies: Anomaly[]): Set<number> {
   const ids = new Set<number>();
   for (const a of anomalies) if (a.track_id !== undefined) ids.add(a.track_id);
@@ -34,6 +36,223 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
+function drawLabel(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  lx: number, ly: number,
+  color: string,
+  placedLabels: { lx: number; ly: number; lw: number; lh: number }[],
+  clampRight = W,
+) {
+  ctx.font = "600 10px monospace";
+  const tw = ctx.measureText(text).width;
+  const lh = 16;
+  const lw = tw + 10;
+  const cx = Math.min(lx, clampRight - lw - 4);
+  const pad = 2;
+  for (const p of placedLabels) {
+    if (cx < p.lx + p.lw + pad && cx + lw + pad > p.lx && ly < p.ly + p.lh + pad && ly + lh + pad > p.ly) return;
+  }
+  placedLabels.push({ lx: cx - 4, ly: ly - 1, lw, lh });
+  roundRect(ctx, cx - 4, ly - 1, lw, lh, 4);
+  ctx.fillStyle = color + "cc";
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.fillText(text, cx, ly + 11);
+}
+
+function resolveStyle(style: OverlayStyle, trackCount: number): Exclude<OverlayStyle, "auto"> {
+  if (style !== "auto") return style;
+  if (trackCount < 8) return "corners";
+  if (trackCount < 20) return "chips";
+  return "dots";
+}
+
+function drawCornersStyle(
+  ctx: CanvasRenderingContext2D,
+  tracks: Track[],
+  anomalyIds: Set<number>,
+  t: number,
+) {
+  const placedLabels: { lx: number; ly: number; lw: number; lh: number }[] = [];
+  const sorted = [...tracks].sort((a, b) => {
+    const as = (anomalyIds.has(a.id) || a.running) ? 1 : 0;
+    const bs = (anomalyIds.has(b.id) || b.running) ? 1 : 0;
+    return bs - as;
+  });
+
+  for (const track of sorted) {
+    const { x1, y1, x2, y2, class_id, class_name, running, id, confidence } = track;
+    const isAnomaly = anomalyIds.has(id);
+    const isPerson = class_id === 0;
+    const boxW = x2 - x1;
+    const boxH = y2 - y1;
+
+    let color: string;
+    if (running) color = "#ef4444";
+    else if (isAnomaly) color = "#f97316";
+    else if (isPerson) color = "#3b82f6";
+    else color = "#f59e0b";
+
+    if (isAnomaly || running) { ctx.shadowBlur = 18; ctx.shadowColor = color; }
+    drawCornerMarker(ctx, x1, y1, x2, y2, color);
+    ctx.shadowBlur = 0;
+
+    const tooSmall = boxW < 38 && boxH < 38;
+    if (!tooSmall) {
+      const confStr = confidence !== undefined ? ` ${(confidence * 100).toFixed(0)}%` : "";
+      const labelText = `#${id} ${class_name}${confStr}${running ? " ⚡" : ""}`;
+      const ly = y1 > 22 ? y1 - 20 : y2 + 4;
+      drawLabel(ctx, labelText, x1, ly, color, placedLabels);
+    }
+
+    if (running) {
+      const cx = (x1 + x2) / 2;
+      const cy = (y1 + y2) / 2;
+      ctx.fillStyle = color + "40";
+      ctx.globalAlpha = 0.5 + 0.5 * Math.abs(Math.sin(t / 200));
+      ctx.beginPath(); ctx.arc(cx, cy, 22, 0, 2 * Math.PI); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+function drawDotsStyle(
+  ctx: CanvasRenderingContext2D,
+  tracks: Track[],
+  anomalyIds: Set<number>,
+  t: number,
+) {
+  for (const track of tracks) {
+    const { x1, y1, x2, y2, class_id, id, running } = track;
+    const isAnomaly = anomalyIds.has(id);
+    const isPerson = class_id === 0;
+
+    let color: string;
+    if (running) color = "#ef4444";
+    else if (isAnomaly) color = "#f97316";
+    else if (isPerson) color = "#3b82f6";
+    else color = "#f59e0b";
+
+    const cx = (x1 + x2) / 2;
+    const footY = y2;
+    const radius = isAnomaly || running ? 7 : 5;
+    const pulse = isAnomaly || running ? 0.6 + 0.4 * Math.abs(Math.sin(t / 250)) : 1;
+
+    ctx.shadowBlur = isAnomaly || running ? 16 : 8;
+    ctx.shadowColor = color;
+
+    ctx.globalAlpha = pulse;
+    ctx.beginPath();
+    ctx.arc(cx, footY, radius, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(cx, footY, radius + 4, 0, 2 * Math.PI);
+    ctx.fillStyle = color + "33";
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+
+    ctx.font = "600 9px monospace";
+    const label = `#${id}`;
+    const lw = ctx.measureText(label).width;
+    ctx.fillStyle = color + "cc";
+    roundRect(ctx, cx - lw / 2 - 4, footY - radius - 17, lw + 8, 13, 3);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.fillText(label, cx - lw / 2, footY - radius - 7);
+  }
+}
+
+function drawHeatmapStyle(
+  ctx: CanvasRenderingContext2D,
+  tracks: Track[],
+) {
+  if (tracks.length === 0) return;
+
+  const prev = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = "screen";
+
+  const personTracks = tracks.filter(t => t.class_id === 0);
+  const radius = 120;
+
+  for (const track of personTracks) {
+    const cx = (track.x1 + track.x2) / 2;
+    const cy = (track.y1 + track.y2) / 2;
+    const bh = track.y2 - track.y1;
+    const r = Math.max(40, Math.min(radius, bh * 1.4));
+
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, "rgba(0,180,255,0.22)");
+    grad.addColorStop(0.35, "rgba(0,255,120,0.12)");
+    grad.addColorStop(0.65, "rgba(255,120,0,0.07)");
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  ctx.globalCompositeOperation = prev;
+
+  for (const track of personTracks) {
+    const cx = (track.x1 + track.x2) / 2;
+    const cy = (track.y1 + track.y2) / 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, 2 * Math.PI);
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.fill();
+  }
+}
+
+function drawChipsStyle(
+  ctx: CanvasRenderingContext2D,
+  tracks: Track[],
+  anomalyIds: Set<number>,
+) {
+  const placedLabels: { lx: number; ly: number; lw: number; lh: number }[] = [];
+
+  const sorted = [...tracks].sort((a, b) => {
+    const as = (anomalyIds.has(a.id) || a.running) ? 1 : 0;
+    const bs = (anomalyIds.has(b.id) || b.running) ? 1 : 0;
+    return bs - as;
+  });
+
+  for (const track of sorted) {
+    const { x1, y1, x2, y2, class_id, class_name, running, id, confidence } = track;
+    const isAnomaly = anomalyIds.has(id);
+    const isPerson = class_id === 0;
+
+    let color: string;
+    if (running) color = "#ef4444";
+    else if (isAnomaly) color = "#f97316";
+    else if (isPerson) color = "#3b82f6";
+    else color = "#f59e0b";
+
+    const confStr = confidence !== undefined ? ` ${(confidence * 100).toFixed(0)}%` : "";
+    const labelText = `#${id} ${class_name}${confStr}${running ? " ⚡" : ""}`;
+    const ly = y1 > 22 ? y1 - 20 : y2 + 4;
+
+    if (isAnomaly || running) {
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = color;
+    }
+    drawLabel(ctx, labelText, x1, ly, color, placedLabels);
+    ctx.shadowBlur = 0;
+
+    const cx = (x1 + x2) / 2;
+    const cy = (y1 + y2) / 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 2.5, 0, 2 * Math.PI);
+    ctx.fillStyle = color + "99";
+    ctx.fill();
+  }
+}
+
 type SourceMode = "idle" | "video" | "webcam" | "stream";
 
 interface RestrictedZone {
@@ -58,10 +277,12 @@ interface Props {
   frameJpeg?: string;
   restrictedZones?: RestrictedZone[];
   smoothFactor?: number;
+  overlayStyle?: OverlayStyle;
 }
 
 function SimulationCanvas({
-  tracks, anomalies, cameraMode, videoRef, sourceMode = "idle", frameJpeg, restrictedZones = [], smoothFactor = 0.3,
+  tracks, anomalies, cameraMode, videoRef, sourceMode = "idle", frameJpeg,
+  restrictedZones = [], smoothFactor = 0.3, overlayStyle = "corners",
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -71,8 +292,10 @@ function SimulationCanvas({
 
   const smoothedMapRef = useRef<Map<number, SmoothedBox>>(new Map());
   const smoothRef = useRef(smoothFactor);
+  const overlayRef = useRef(overlayStyle);
 
   useEffect(() => { smoothRef.current = smoothFactor; }, [smoothFactor]);
+  useEffect(() => { overlayRef.current = overlayStyle; }, [overlayStyle]);
 
   useEffect(() => {
     if (!frameJpeg || frameJpeg === lastJpegRef.current) return;
@@ -101,6 +324,7 @@ function SimulationCanvas({
       if (!ctx || !canvas) return;
       const { tracks, anomalies, cameraMode, sourceMode, restrictedZones } = dataRef.current;
       const alpha = smoothRef.current;
+      const style = overlayRef.current;
       const smap = smoothedMapRef.current;
       const t = Date.now();
 
@@ -197,14 +421,11 @@ function SimulationCanvas({
         }
       }
 
-      // ── Smooth lerp: glide bounding boxes toward target positions ───────────
-      // Remove entries for tracks no longer in frame
       const activeIds = new Set(tracks.map(tk => tk.id));
       for (const id of smap.keys()) {
         if (!activeIds.has(id)) smap.delete(id);
       }
 
-      // Lerp each track toward its new YOLO position
       const smoothedTracks = tracks.map(tk => {
         const prev = smap.get(tk.id);
         if (!prev || alpha >= 0.99) {
@@ -221,77 +442,18 @@ function SimulationCanvas({
         return { ...tk, x1: sx1, y1: sy1, x2: sx2, y2: sy2 };
       });
 
-      // ── Detection tracks ────────────────────────────────────────────────────
-      const sorted = [...smoothedTracks].sort((a, b) => {
-        const aScore = (anomalyIds.has(a.id) || a.running) ? 1 : 0;
-        const bScore = (anomalyIds.has(b.id) || b.running) ? 1 : 0;
-        return bScore - aScore;
-      });
+      const resolved = resolveStyle(style, smoothedTracks.length);
 
-      const placedLabels: { lx: number; ly: number; lw: number; lh: number }[] = [];
-
-      const labelOverlaps = (lx: number, ly: number, lw: number, lh: number) => {
-        const pad = 2;
-        for (const p of placedLabels) {
-          if (
-            lx < p.lx + p.lw + pad &&
-            lx + lw + pad > p.lx &&
-            ly < p.ly + p.lh + pad &&
-            ly + lh + pad > p.ly
-          ) return true;
-        }
-        return false;
-      };
-
-      for (const track of sorted) {
-        const { x1, y1, x2, y2, class_id, class_name, running, id, confidence } = track;
-        const isAnomaly = anomalyIds.has(id);
-        const isPerson = class_id === 0;
-        const boxW = x2 - x1;
-        const boxH = y2 - y1;
-
-        let color: string;
-        if (running) color = "#ef4444";
-        else if (isAnomaly) color = "#f97316";
-        else if (isPerson) color = "#3b82f6";
-        else color = "#f59e0b";
-
-        if (isAnomaly || running) { ctx.shadowBlur = 18; ctx.shadowColor = color; }
-        drawCornerMarker(ctx, x1, y1, x2, y2, color);
-        ctx.shadowBlur = 0;
-
-        const tooSmall = boxW < 38 && boxH < 38;
-        if (!tooSmall) {
-          const confStr = confidence !== undefined ? ` ${(confidence * 100).toFixed(0)}%` : "";
-          const labelText = `#${id} ${class_name}${confStr}${running ? " ⚡" : ""}`;
-          ctx.font = "600 10px monospace";
-          const tw = ctx.measureText(labelText).width;
-          const lh = 16;
-          const lw = tw + 10;
-          const lx = Math.min(x1, W - lw - 4);
-          const ly = y1 > 22 ? y1 - 20 : y2 + 4;
-
-          if (!labelOverlaps(lx - 4, ly - 1, lw, lh)) {
-            placedLabels.push({ lx: lx - 4, ly: ly - 1, lw, lh });
-            roundRect(ctx, lx - 4, ly - 1, lw, lh, 4);
-            ctx.fillStyle = color + "cc";
-            ctx.fill();
-            ctx.fillStyle = "#fff";
-            ctx.fillText(labelText, lx, ly + 11);
-          }
-        }
-
-        if (running) {
-          const cx = (x1 + x2) / 2;
-          const cy = (y1 + y2) / 2;
-          ctx.fillStyle = color + "40";
-          ctx.globalAlpha = 0.5 + 0.5 * Math.abs(Math.sin(t / 200));
-          ctx.beginPath(); ctx.arc(cx, cy, 22, 0, 2 * Math.PI); ctx.fill();
-          ctx.globalAlpha = 1;
-        }
+      if (resolved === "heatmap") {
+        drawHeatmapStyle(ctx, smoothedTracks);
+      } else if (resolved === "dots") {
+        drawDotsStyle(ctx, smoothedTracks, anomalyIds, t);
+      } else if (resolved === "chips") {
+        drawChipsStyle(ctx, smoothedTracks, anomalyIds);
+      } else {
+        drawCornersStyle(ctx, smoothedTracks, anomalyIds, t);
       }
 
-      // ── Anomaly zone overlays ───────────────────────────────────────────────
       for (const anomaly of anomalies) {
         if (!anomaly.position) continue;
         const [ax, ay] = anomaly.position;
@@ -359,7 +521,6 @@ function SimulationCanvas({
         }
       }
 
-      // ── HUD ────────────────────────────────────────────────────────────────
       const modeLabel = (() => {
         if (sourceMode === "video")  return "YOLO · VIDEO";
         if (sourceMode === "webcam") return "YOLO · WEBCAM";
@@ -414,19 +575,14 @@ export default memo(SimulationCanvas, (prev, next) => {
   if (prev.cameraMode !== next.cameraMode) return false;
   if (prev.videoRef !== next.videoRef) return false;
   if (prev.smoothFactor !== next.smoothFactor) return false;
+  if (prev.overlayStyle !== next.overlayStyle) return false;
   if ((prev.restrictedZones?.length ?? 0) !== (next.restrictedZones?.length ?? 0)) return false;
   if ((prev.restrictedZones?.length ?? 0) > 0) {
     for (let i = 0; i < (prev.restrictedZones?.length ?? 0); i++) {
       const pz = prev.restrictedZones?.[i];
       const nz = next.restrictedZones?.[i];
       if (!pz || !nz) return false;
-      if (
-        pz.id !== nz.id
-        || pz.x1 !== nz.x1
-        || pz.y1 !== nz.y1
-        || pz.x2 !== nz.x2
-        || pz.y2 !== nz.y2
-      ) return false;
+      if (pz.id !== nz.id || pz.x1 !== nz.x1 || pz.y1 !== nz.y1 || pz.x2 !== nz.x2 || pz.y2 !== nz.y2) return false;
     }
   }
   if (prev.tracks.length !== next.tracks.length) return false;

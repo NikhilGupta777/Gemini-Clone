@@ -4,7 +4,7 @@ import { useAlertSound } from "../hooks/useAlertSound";
 import { useCamProcessor } from "../hooks/useCamProcessor";
 import { useLocalCamRelay } from "../hooks/useLocalCamRelay";
 import { useIsMobile } from "../hooks/use-mobile";
-import SimulationCanvas from "../components/SimulationCanvas";
+import SimulationCanvas, { OverlayStyle } from "../components/SimulationCanvas";
 import StatsCards from "../components/StatsCards";
 import AlertsFeed from "../components/AlertsFeed";
 import {
@@ -101,10 +101,17 @@ export default function Dashboard() {
     return saved !== null ? parseFloat(saved) : 0.3;
   });
 
+  const [overlayStyle, setOverlayStyle] = useState<OverlayStyle>(() => {
+    return (localStorage.getItem("crowdlens_overlay_style") as OverlayStyle) ?? "corners";
+  });
+
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === "crowdlens_box_smooth" && e.newValue !== null) {
         setBoxSmooth(parseFloat(e.newValue));
+      }
+      if (e.key === "crowdlens_overlay_style" && e.newValue !== null) {
+        setOverlayStyle(e.newValue as OverlayStyle);
       }
     };
     window.addEventListener("storage", onStorage);
@@ -1046,6 +1053,8 @@ export default function Dashboard() {
               sourceMode={displayMode}
               frameJpeg={frame?.frame_jpeg}
               restrictedZones={zoneEnabled ? restrictedZones : []}
+              smoothFactor={boxSmooth}
+              overlayStyle={overlayStyle}
             />
           </div>
 

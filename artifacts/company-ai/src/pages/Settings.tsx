@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useIsMobile } from "../hooks/use-mobile";
 import {
   CheckCircle,
@@ -208,9 +208,133 @@ function ToggleCard({
   );
 }
 
+type OverlayStyle = "corners" | "dots" | "heatmap" | "chips" | "auto";
+
+const OVERLAY_OPTIONS: {
+  id: OverlayStyle;
+  label: string;
+  tag: string;
+  description: string;
+  preview: React.ReactNode;
+  color: string;
+}[] = [
+  {
+    id: "corners",
+    label: "Corner Brackets",
+    tag: "DEFAULT",
+    description: "L-shaped corner markers with ID labels and confidence. Best for identifying individuals.",
+    color: "#3b82f6",
+    preview: (
+      <svg width="56" height="42" viewBox="0 0 56 42">
+        <line x1="4" y1="16" x2="4" y2="4" stroke="#3b82f6" strokeWidth="2.2" strokeLinecap="square"/>
+        <line x1="4" y1="4" x2="16" y2="4" stroke="#3b82f6" strokeWidth="2.2" strokeLinecap="square"/>
+        <line x1="52" y1="4" x2="40" y2="4" stroke="#3b82f6" strokeWidth="2.2" strokeLinecap="square"/>
+        <line x1="52" y1="4" x2="52" y2="16" stroke="#3b82f6" strokeWidth="2.2" strokeLinecap="square"/>
+        <line x1="4" y1="26" x2="4" y2="38" stroke="#3b82f6" strokeWidth="2.2" strokeLinecap="square"/>
+        <line x1="4" y1="38" x2="16" y2="38" stroke="#3b82f6" strokeWidth="2.2" strokeLinecap="square"/>
+        <line x1="52" y1="38" x2="40" y2="38" stroke="#3b82f6" strokeWidth="2.2" strokeLinecap="square"/>
+        <line x1="52" y1="26" x2="52" y2="38" stroke="#3b82f6" strokeWidth="2.2" strokeLinecap="square"/>
+        <rect x="10" y="17" width="36" height="4" rx="2" fill="#3b82f6" opacity="0.3"/>
+      </svg>
+    ),
+  },
+  {
+    id: "dots",
+    label: "Glowing Dots",
+    tag: "MINIMAL",
+    description: "Small glowing dots at each person's feet with track ID. Clean look for dense crowds.",
+    color: "#10b981",
+    preview: (
+      <svg width="56" height="42" viewBox="0 0 56 42">
+        {[12, 28, 44].map((cx, i) => (
+          <g key={i}>
+            <circle cx={cx} cy={32} r={9} fill="#10b981" opacity="0.12"/>
+            <circle cx={cx} cy={32} r={5} fill="#10b981" opacity="0.4"/>
+            <circle cx={cx} cy={32} r={3} fill="#10b981"/>
+            <rect x={cx - 8} y={14} width={16} height={10} rx={3} fill="#10b981" opacity="0.7"/>
+            <text x={cx} y={22} textAnchor="middle" fill="#fff" fontSize="6" fontFamily="monospace" fontWeight="bold">#{i + 1}</text>
+          </g>
+        ))}
+      </svg>
+    ),
+  },
+  {
+    id: "heatmap",
+    label: "Density Heatmap",
+    tag: "ANALYTICS",
+    description: "Color density overlay showing crowd concentration. Best for crowd analytics and hotspot analysis.",
+    color: "#f97316",
+    preview: (
+      <svg width="56" height="42" viewBox="0 0 56 42">
+        <defs>
+          <radialGradient id="h1" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#ef4444" stopOpacity="0.9"/>
+            <stop offset="60%" stopColor="#f97316" stopOpacity="0.5"/>
+            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0"/>
+          </radialGradient>
+          <radialGradient id="h2" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#f97316" stopOpacity="0.8"/>
+            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0"/>
+          </radialGradient>
+        </defs>
+        <ellipse cx="22" cy="22" rx="18" ry="16" fill="url(#h1)"/>
+        <ellipse cx="40" cy="18" rx="14" ry="12" fill="url(#h2)"/>
+        <circle cx="22" cy="22" r="2" fill="white" opacity="0.7"/>
+        <circle cx="40" cy="18" r="2" fill="white" opacity="0.7"/>
+      </svg>
+    ),
+  },
+  {
+    id: "chips",
+    label: "ID Chips Only",
+    tag: "ULTRA CLEAN",
+    description: "Just floating ID label chips, no boxes or markers. Most minimal — best for very large crowds.",
+    color: "#a855f7",
+    preview: (
+      <svg width="56" height="42" viewBox="0 0 56 42">
+        {[[4, 8], [18, 22], [32, 12], [10, 30]].map(([x, y], i) => (
+          <g key={i}>
+            <rect x={x} y={y} width={22} height={11} rx={4} fill="#a855f7" opacity="0.75"/>
+            <text x={x + 11} y={y + 8} textAnchor="middle" fill="#fff" fontSize="6" fontFamily="monospace" fontWeight="bold">#{i + 1}</text>
+          </g>
+        ))}
+      </svg>
+    ),
+  },
+  {
+    id: "auto",
+    label: "Automatic",
+    tag: "SMART",
+    description: "Switches style based on crowd count: brackets (<8 people), chips (8–20), dots (20+). Always optimal.",
+    color: "#eab308",
+    preview: (
+      <svg width="56" height="42" viewBox="0 0 56 42">
+        <text x="28" y="16" textAnchor="middle" fill="#eab308" fontSize="9" fontFamily="monospace" fontWeight="bold">&lt;8</text>
+        <line x1="14" y1="22" x2="14" y2="17" stroke="#3b82f6" strokeWidth="1.5"/>
+        <line x1="14" y1="17" x2="19" y2="17" stroke="#3b82f6" strokeWidth="1.5"/>
+        <text x="28" y="28" textAnchor="middle" fill="#eab308" fontSize="9" fontFamily="monospace" fontWeight="bold">20+</text>
+        <circle cx="42" cy="35" r="4" fill="#10b981" opacity="0.9"/>
+        <circle cx="42" cy="35" r="7" fill="#10b981" opacity="0.25"/>
+        <rect x="18" y="33" width="14" height="7" rx="3" fill="#a855f7" opacity="0.75"/>
+        <text x="25" y="39" textAnchor="middle" fill="#fff" fontSize="5" fontFamily="monospace">#12</text>
+      </svg>
+    ),
+  },
+];
+
 export default function Settings() {
   const isMobile = useIsMobile();
   const [config, setConfig] = useState<Config>(DEFAULT_CONFIG);
+
+  const [overlayStyle, setOverlayStyleState] = useState<OverlayStyle>(() => {
+    return (localStorage.getItem("crowdlens_overlay_style") as OverlayStyle) ?? "corners";
+  });
+
+  const setOverlayStyle = (s: OverlayStyle) => {
+    setOverlayStyleState(s);
+    localStorage.setItem("crowdlens_overlay_style", s);
+    window.dispatchEvent(new StorageEvent("storage", { key: "crowdlens_overlay_style", newValue: s }));
+  };
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -320,6 +444,121 @@ export default function Settings() {
       {saveError && (
         <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 12 }}>{saveError}</div>
       )}
+
+      {/* ── Overlay Style ──────────────────────────────────────────────────── */}
+      <div style={{
+        background: "rgba(255,255,255,0.025)",
+        border: "1px solid rgba(255,255,255,0.07)",
+        borderRadius: 14,
+        padding: 24,
+        marginBottom: 20,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+          <div style={{ fontSize: 9, color: "#475569", letterSpacing: 2, fontWeight: 700 }}>
+            DETECTION OVERLAY STYLE
+          </div>
+          <div style={{
+            marginLeft: "auto",
+            background: "rgba(99,102,241,0.15)",
+            color: "#818cf8",
+            fontSize: 9,
+            fontWeight: 800,
+            padding: "2px 8px",
+            borderRadius: 10,
+            letterSpacing: 1,
+          }}>
+            LIVE PREVIEW
+          </div>
+        </div>
+
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(5, 1fr)",
+          gap: 10,
+        }}>
+          {OVERLAY_OPTIONS.map((opt) => {
+            const active = overlayStyle === opt.id;
+            return (
+              <button
+                key={opt.id}
+                onClick={() => setOverlayStyle(opt.id)}
+                style={{
+                  background: active
+                    ? `linear-gradient(135deg, ${opt.color}22, ${opt.color}10)`
+                    : "rgba(255,255,255,0.02)",
+                  border: `1.5px solid ${active ? opt.color : "rgba(255,255,255,0.07)"}`,
+                  borderRadius: 12,
+                  padding: "14px 10px 12px",
+                  cursor: "pointer",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 8,
+                  transition: "all 0.18s",
+                  boxShadow: active ? `0 0 18px ${opt.color}33` : "none",
+                  position: "relative",
+                }}
+              >
+                {active && (
+                  <div style={{
+                    position: "absolute",
+                    top: 6,
+                    right: 6,
+                    width: 7,
+                    height: 7,
+                    borderRadius: "50%",
+                    background: opt.color,
+                    boxShadow: `0 0 6px ${opt.color}`,
+                  }} />
+                )}
+                <div style={{
+                  background: "rgba(0,0,0,0.3)",
+                  borderRadius: 8,
+                  padding: "6px 8px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minHeight: 52,
+                }}>
+                  {opt.preview}
+                </div>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: active ? opt.color : "#94a3b8",
+                    marginBottom: 3,
+                  }}>
+                    {opt.label}
+                  </div>
+                  <div style={{
+                    fontSize: 8,
+                    fontWeight: 800,
+                    color: active ? opt.color + "aa" : "#334155",
+                    letterSpacing: 1.2,
+                    marginBottom: 5,
+                  }}>
+                    {opt.tag}
+                  </div>
+                  <div style={{
+                    fontSize: 9,
+                    color: "#475569",
+                    lineHeight: 1.4,
+                    display: isMobile ? "none" : "block",
+                  }}>
+                    {opt.description}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ marginTop: 14, fontSize: 11, color: "#334155" }}>
+          Changes apply instantly to the live detection canvas — no save required.
+          Anomaly warnings (overcrowding, fights, falls) always remain visible regardless of style.
+        </div>
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
         <div
