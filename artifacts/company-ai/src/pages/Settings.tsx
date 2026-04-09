@@ -331,7 +331,7 @@ export default function Settings() {
 
   const [boxSmooth, setBoxSmoothState] = useState<number>(() => {
     const saved = localStorage.getItem("crowdlens_box_smooth");
-    return saved !== null ? parseFloat(saved) : 0.3;
+    return saved !== null ? parseFloat(saved) : 0.7;
   });
 
   const setOverlayStyle = (s: OverlayStyle) => {

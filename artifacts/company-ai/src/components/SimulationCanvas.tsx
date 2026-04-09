@@ -324,7 +324,11 @@ function SimulationCanvas({
     function draw() {
       if (!ctx || !canvas) return;
       const { tracks, anomalies, cameraMode, sourceMode, restrictedZones } = dataRef.current;
-      const alpha = smoothRef.current;
+      // Invert smoothFactor so the slider is semantically correct:
+      // 0 = no smoothing (snappy), 1 = maximum smoothing (laggy/smooth).
+      // Clamp minimum alpha to 0.05 so even at full smoothing the box still tracks.
+      const rawSmooth = smoothRef.current;
+      const alpha = rawSmooth <= 0.01 ? 1.0 : Math.max(0.05, 1 - rawSmooth);
       const style = overlayRef.current;
       const smap = smoothedMapRef.current;
       const t = Date.now();

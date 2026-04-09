@@ -98,7 +98,7 @@ export default function Dashboard() {
 
   const [boxSmooth, setBoxSmooth] = useState<number>(() => {
     const saved = localStorage.getItem("crowdlens_box_smooth");
-    return saved !== null ? parseFloat(saved) : 0.3;
+    return saved !== null ? parseFloat(saved) : 0.7;
   });
 
   const [overlayStyle, setOverlayStyle] = useState<OverlayStyle>(() => {
