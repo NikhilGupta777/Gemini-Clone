@@ -612,15 +612,20 @@ async def stream_processing_loop(url: str):
         cmd = ["ffmpeg", "-y", "-loglevel", "error"]
         if source_input.lower().startswith("rtsp://"):
             # RTSP sources can hang and buffer deeply; use low-latency settings.
+            # probesize: 131072 bytes (128 KB) — enough for H.264/H.265 codec
+            #   detection from Hikvision, Dahua, Axis, and most campus cameras.
+            #   32 bytes (old value) was too small and caused codec init failures.
+            # analyzeduration: 2 s — gives SDP negotiation time to complete on
+            #   cameras that are slow to send the first RTP packet.
             cmd += [
                 "-fflags",
                 "nobuffer",
                 "-flags",
                 "low_delay",
                 "-analyzeduration",
-                "0",
+                "2000000",
                 "-probesize",
-                "32",
+                "131072",
                 "-rtsp_transport",
                 "tcp",
                 "-timeout",

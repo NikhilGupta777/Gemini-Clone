@@ -98,8 +98,8 @@ export function useLocalCamRelay() {
       const age = Date.now() - lastFrameRef.current;
       if (age >= STALE_TIMEOUT_MS) {
         setError(
-          `No frames received from ${label} for ${Math.round(age / 1000)} s.\n` +
-          "DroidCam may have stopped — tap RE-START in the DroidCam app and try connecting again."
+          `No frames received from the camera for ${Math.round(age / 1000)} s.\n` +
+          "The camera may have stopped streaming — check it is powered on, reachable on the network, and the URL is correct."
         );
         setState("error");
         activeRef.current = false;
@@ -253,10 +253,10 @@ export function useLocalCamRelay() {
           setError(
             msg + "\n\n" +
             "If the URL is correct, make sure:\n" +
-            "• DroidCam is running and showing your camera\n" +
-            "• Both devices are on the same WiFi\n" +
-            "• HTTPS is turned OFF in DroidCam → Settings → IP Webcam\n" +
-            "• Try the snapshot URL: http://IP:4747/shot.jpg"
+            "• The camera is powered on and reachable on the network\n" +
+            "• This device and the camera are on the same network\n" +
+            "• The stream URL is correct (e.g. http://192.168.x.x:port/video)\n" +
+            "• For DroidCam: HTTPS is OFF in DroidCam → Settings → IP Webcam"
           );
           setState("error");
           activeRef.current = false;
