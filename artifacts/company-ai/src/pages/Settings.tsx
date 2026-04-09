@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState, ReactNode } from "react";
+import { OverlayStyle } from "../components/SimulationCanvas";
 import { useIsMobile } from "../hooks/use-mobile";
 import {
   CheckCircle,
@@ -208,14 +209,12 @@ function ToggleCard({
   );
 }
 
-type OverlayStyle = "corners" | "dots" | "heatmap" | "chips" | "auto";
-
 const OVERLAY_OPTIONS: {
   id: OverlayStyle;
   label: string;
   tag: string;
   description: string;
-  preview: React.ReactNode;
+  preview: ReactNode;
   color: string;
 }[] = [
   {
@@ -330,10 +329,21 @@ export default function Settings() {
     return (localStorage.getItem("crowdlens_overlay_style") as OverlayStyle) ?? "corners";
   });
 
+  const [boxSmooth, setBoxSmoothState] = useState<number>(() => {
+    const saved = localStorage.getItem("crowdlens_box_smooth");
+    return saved !== null ? parseFloat(saved) : 0.3;
+  });
+
   const setOverlayStyle = (s: OverlayStyle) => {
     setOverlayStyleState(s);
     localStorage.setItem("crowdlens_overlay_style", s);
     window.dispatchEvent(new StorageEvent("storage", { key: "crowdlens_overlay_style", newValue: s }));
+  };
+
+  const setBoxSmooth = (v: number) => {
+    setBoxSmoothState(v);
+    localStorage.setItem("crowdlens_box_smooth", String(v));
+    window.dispatchEvent(new StorageEvent("storage", { key: "crowdlens_box_smooth", newValue: String(v) }));
   };
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);

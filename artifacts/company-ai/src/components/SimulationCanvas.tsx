@@ -61,10 +61,11 @@ function drawLabel(
   ctx.fillText(text, cx, ly + 11);
 }
 
-function resolveStyle(style: OverlayStyle, trackCount: number): Exclude<OverlayStyle, "auto"> {
+function resolveStyle(style: OverlayStyle, tracks: Track[]): Exclude<OverlayStyle, "auto"> {
   if (style !== "auto") return style;
-  if (trackCount < 8) return "corners";
-  if (trackCount < 20) return "chips";
+  const personCount = tracks.filter(t => t.class_id === 0).length;
+  if (personCount < 8) return "corners";
+  if (personCount < 20) return "chips";
   return "dots";
 }
 
@@ -124,7 +125,7 @@ function drawDotsStyle(
   t: number,
 ) {
   for (const track of tracks) {
-    const { x1, y1, x2, y2, class_id, id, running } = track;
+    const { x1, x2, y2, class_id, id, running } = track;
     const isAnomaly = anomalyIds.has(id);
     const isPerson = class_id === 0;
 
@@ -442,7 +443,7 @@ function SimulationCanvas({
         return { ...tk, x1: sx1, y1: sy1, x2: sx2, y2: sy2 };
       });
 
-      const resolved = resolveStyle(style, smoothedTracks.length);
+      const resolved = resolveStyle(style, smoothedTracks);
 
       if (resolved === "heatmap") {
         drawHeatmapStyle(ctx, smoothedTracks);
@@ -589,7 +590,8 @@ export default memo(SimulationCanvas, (prev, next) => {
   if (prev.anomalies.length !== next.anomalies.length) return false;
   for (let i = 0; i < prev.tracks.length; i++) {
     const p = prev.tracks[i], n = next.tracks[i];
-    if (p.id !== n.id || p.x1 !== n.x1 || p.y1 !== n.y1 || p.x2 !== n.x2 || p.y2 !== n.y2 || p.running !== n.running) return false;
+    if (p.id !== n.id || p.x1 !== n.x1 || p.y1 !== n.y1 || p.x2 !== n.x2 || p.y2 !== n.y2
+      || p.running !== n.running || p.confidence !== n.confidence || p.class_name !== n.class_name) return false;
   }
   for (let i = 0; i < prev.anomalies.length; i++) {
     const p = prev.anomalies[i], n = next.anomalies[i];
